@@ -12,8 +12,8 @@ type Clock struct {
 	dilatedEpoch   time.Time
 	dilationFactor float64
 	access         sync.Mutex
-	timers         []*Timer
-	alarms         []*Alarm
+	timers         map[int]Timer
+	idCounter      int
 }
 
 // NewClock creates a clock initialized with the given initialDilationFactor.
@@ -23,6 +23,7 @@ func NewClock(initialDilationFactor float64, initialEpoch time.Time) Clock {
 		trueEpoch:      initialEpoch,
 		dilatedEpoch:   initialEpoch,
 		dilationFactor: initialDilationFactor,
+		timers:         make(map[int]Timer),
 	}
 }
 
@@ -51,23 +52,28 @@ func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 	clock.dilationFactor = newDilationFactor
 }
 
-func (clock *Clock) TimeJump(jumpDistance time.Duration) {
+func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	clock.dilatedEpoch = clock.dilatedEpoch.Add(jumpDistance)
 }
 
-func (clock *Clock) NewTimer(duration time.Duration) Timer {
+func (clock *Clock) After(realDuration time.Duration) <-chan time.Time {
 	clock.access.Lock()
 	defer clock.access.Unlock()
-	newTimer := Timer{
-		trueTimer: time.NewTimer(time.Duration(float64(duration) / clock.dilationFactor)),
+	dilatedDuration := time.Duration(float64(realDuration) / clock.dilationFactor)
+	newTrueTimer := time.NewTimer(dilatedDuration)
+	newWarpedTimer := Timer{
+		id:        clock.idCounter,
+		trueTimer: newTrueTimer,
 	}
-	clock.timers = append(clock.timers, &newTimer)
-	return newTimer
+	clock.timers[newWarpedTimer.id] = newWarpedTimer
+	clock.idCounter++
+	return newTrueTimer.C
 }
 
 type Timer struct {
+	id        int
 	trueTimer *time.Timer
 }
 
@@ -75,16 +81,6 @@ func (timer *Timer) Stop() {
 	timer.trueTimer.Stop()
 }
 
-func (clock *Clock) NewAlarm(desiredAlarmTime time.Time) Alarm {
-	clock.access.Lock()
-	defer clock.access.Unlock()
-	newAlarm := Alarm{
-		originalTime: desiredAlarmTime,
-	}
-	clock.alarms = append(clock.alarms, &newAlarm)
-	return newAlarm
-}
-
-type Alarm struct {
-	originalTime time.Time
+func (timer *Timer) Reset(newDuration time.Duration) bool {
+	return timer.trueTimer.Reset(newDuration)
 }

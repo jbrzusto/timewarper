@@ -1,6 +1,7 @@
 package timewarper
 
 import (
+	"context"
 	"golang.org/x/sync/errgroup"
 	"math/rand/v2"
 	"testing"
@@ -8,6 +9,7 @@ import (
 )
 
 func TestStaticDilation(test *testing.T) {
+	test.Parallel()
 	timeDilationTolerance := 0.0001
 	tickDuration := time.Second
 	totalTicks := 10
@@ -107,7 +109,7 @@ func TestStaticDilation(test *testing.T) {
 }
 
 func TestDynamicDilation(test *testing.T) {
-	// TODO: Add tests that vary how long they sit at each dilation factor
+	test.Parallel()
 	timeDilationTolerance := 0.001
 	tickDuration := time.Second
 	testCases := []struct {
@@ -193,24 +195,142 @@ func TestDynamicDilation(test *testing.T) {
 	}
 }
 
-func TestTimeJump(test *testing.T) {
+func TestTimers(test *testing.T) {
+	test.Parallel()
 	testCases := []struct {
-		name           string
-		distanceToJump time.Duration
+		name                    string
+		timerDuration           time.Duration
+		dilationFactor          float64
+		normalTimeShouldBeFirst bool
 	}{
 		{
-			name:           "Jump Forward",
-			distanceToJump: 1 * time.Hour,
+			name:                    "Timer-With-Faster-Dilation",
+			timerDuration:           1 * time.Second,
+			dilationFactor:          2,
+			normalTimeShouldBeFirst: false,
 		},
 		{
-			name:           "Jump Backward",
-			distanceToJump: -1 * time.Hour,
+			name:                    "Time-With-Slower-Dilation",
+			timerDuration:           1 * time.Second,
+			dilationFactor:          0.5,
+			normalTimeShouldBeFirst: true,
 		},
 	}
 	for _, testCase := range testCases {
-		test.Run(testCase.name, func(subTest *testing.T) {
-			subTest.Parallel()
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			clock := NewClock(testCase.dilationFactor, time.Now())
+			var normalTimerActualFinishTime time.Time
+			var warpedTimerActualFinishTime time.Time
+			startTime := time.Now()
+			ctx, cancel := context.WithTimeout(test.Context(), testCase.timerDuration+time.Second)
+			defer cancel()
+			waitGroup, ctx := errgroup.WithContext(ctx)
+			waitGroup.Go(func() error {
+				select {
+				case normalTimerActualFinishTime = <-time.After(testCase.timerDuration):
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+			waitGroup.Go(func() error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case warpedTimerActualFinishTime = <-clock.After(testCase.timerDuration):
+					return nil
+				}
+			})
+			err := waitGroup.Wait()
+			if err != nil {
+				test.Errorf("encountered error waiting on timers: %v", err)
+			}
+			normalTimerWasFirst := normalTimerActualFinishTime.Before(warpedTimerActualFinishTime)
+			testFailed := normalTimerWasFirst != testCase.normalTimeShouldBeFirst
+			if testFailed {
+				test.Errorf("timers were not triggered in the correct order. Expected normal timer first: %v but normal timer was first: %v", testCase.normalTimeShouldBeFirst, normalTimerWasFirst)
+			}
+			warpedTimerRealDuration := float64(warpedTimerActualFinishTime.Sub(startTime))
+			maximumAllowedRealDuration := 0.01 + float64(testCase.timerDuration)/testCase.dilationFactor
+			minimumAllowedRealDuration := 0.01 - float64(testCase.timerDuration)/testCase.dilationFactor
+			timeIsNotWithinTolerance := warpedTimerRealDuration < minimumAllowedRealDuration || warpedTimerRealDuration >= maximumAllowedRealDuration
+			if timeIsNotWithinTolerance {
+				test.Errorf("warped timer duration %v was not within tolerance", warpedTimerRealDuration)
+			}
+		})
+	}
+}
 
+func TestTimeJumping(test *testing.T) {
+	test.Parallel()
+	testCases := []struct {
+		name                    string
+		dilationFactor          float64
+		jumpDistance            time.Duration
+		timerBeforeJumpDuration time.Duration
+		timerAfterJumpDuration  time.Duration
+	}{
+		{
+			name:         "Just-A-Jump",
+			jumpDistance: time.Hour,
+		},
+		{
+			name:                    "Jump-An-Hour-Forward-And-Trigger-A-Timer",
+			jumpDistance:            time.Hour,
+			timerBeforeJumpDuration: 30 * time.Minute,
+			timerAfterJumpDuration:  time.Hour + time.Second,
+		},
+	}
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			aTimerThatWillBeTriggeredByJumpExists := testCase.timerBeforeJumpDuration > 0
+			aTimerThatWontBeTriggeredExists := testCase.timerAfterJumpDuration > testCase.jumpDistance
+			startTime := time.Now()
+			clock := NewClock(testCase.dilationFactor, startTime)
+			var beforeJumpTimer <-chan time.Time
+			var afterJumpTimer <-chan time.Time
+			if aTimerThatWillBeTriggeredByJumpExists {
+				beforeJumpTimer = clock.After(testCase.timerBeforeJumpDuration)
+			}
+			if aTimerThatWontBeTriggeredExists {
+				afterJumpTimer = clock.After(testCase.timerAfterJumpDuration)
+			}
+			clock.JumpToTheFuture(testCase.jumpDistance)
+			timeClockActuallyJumped := clock.Now().Sub(startTime)
+			minimumAllowedJumpedTime := testCase.jumpDistance
+			maximumAllowedJumpedTime := minimumAllowedJumpedTime + time.Millisecond
+			timeClockActuallyJumpedNotTolerable := timeClockActuallyJumped < minimumAllowedJumpedTime || timeClockActuallyJumped > maximumAllowedJumpedTime
+			if timeClockActuallyJumpedNotTolerable {
+				test.Errorf("time that the clock actually jumped %v is not acceptabled", timeClockActuallyJumped)
+			}
+			if aTimerThatWillBeTriggeredByJumpExists {
+				select {
+				// Why is something coming on the channel?
+				case triggeredTime := <-beforeJumpTimer:
+					timeBetweenStartAndEndOfTimer := triggeredTime.Sub(startTime)
+					minimumToleratedTime := testCase.timerBeforeJumpDuration
+					maximumToleratedTime := minimumToleratedTime + time.Millisecond
+					timeBetweenStartAndEndOfTimerOutsideTolerances := timeBetweenStartAndEndOfTimer < minimumToleratedTime || timeBetweenStartAndEndOfTimer > maximumToleratedTime
+					if timeBetweenStartAndEndOfTimerOutsideTolerances {
+						test.Errorf("timer that should have been triggered by time jump was triggered outside of tolerances. Time between start and end was %v", timeBetweenStartAndEndOfTimer)
+					}
+				default:
+					// We should be getting here in this failure case
+					test.Errorf("timer that was suppose to be triggered by jump was not triggered")
+				}
+			}
+			if aTimerThatWontBeTriggeredExists {
+				select {
+				// Why is something coming on the channel?
+				case triggeredTime := <-afterJumpTimer:
+					test.Errorf("timer that was suppose to trigger after the time jump was triggered at time %v", triggeredTime)
+				default:
+					// We should be getting here
+					// This is the desired outcome
+				}
+			}
 		})
 	}
 }
