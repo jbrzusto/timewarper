@@ -51,6 +51,11 @@ func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 	clock.dilatedEpoch = now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor)
 	clock.trueEpoch = time.Now()
 	clock.dilationFactor = newDilationFactor
+	for i := range clock.timers {
+		trueTimeRemaining := clock.timers[i].expectedTriggerTime.Sub(clock.trueEpoch)
+		newDilatedDuration := time.Duration(float64(trueTimeRemaining) / clock.dilationFactor)
+		clock.timers[i].trueTimer.Reset(newDilatedDuration)
+	}
 }
 
 // JumpToTheFuture will use the given jumpDistance to move the clock forward that far.
