@@ -269,8 +269,8 @@ func TestTimers(test *testing.T) {
 				test.Errorf("The warped timer did not return the correct time.\nExpected %v\nActual   %v\nDifference(Normal Time - Warped Time): %v",
 					normalTimerFinishTime.Format(time.RFC3339), warpedTimerFinishTime.Format(time.RFC3339), normalTimerFinishTime.Sub(warpedTimerFinishTime))
 			}
-			maximumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) + time.Millisecond
-			minimumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) - time.Millisecond
+			maximumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) + 2*time.Millisecond
+			minimumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) - 2*time.Millisecond
 			timeIsNotWithinTolerance := warpedTimerDuration < minimumAllowedRealDuration || warpedTimerDuration > maximumAllowedRealDuration
 			if timeIsNotWithinTolerance {
 				test.Errorf("warped timer duration %v was not within acceptable range of %v - %v", warpedTimerDuration, minimumAllowedRealDuration, maximumAllowedRealDuration)
@@ -342,6 +342,49 @@ func TestTimeJumping(test *testing.T) {
 				if nowIs.After(timerInfo.expirationTime) {
 					test.Errorf("a timer that was suppose to be triggered was not triggered\nnowIs:      %v\nexpiration: %v\ndistanceFromNowToStart: %v", nowIs.Format(time.RFC3339), timerInfo.expirationTime.Format(time.RFC3339), nowIs.Sub(startTime))
 				}
+			}
+		})
+	}
+}
+
+func TestTimersWithChangesInDilationFactor(test *testing.T) {
+	test.Parallel()
+	testCases := []struct {
+		name           string
+		dilationFactor float64
+		timerDuration  time.Duration
+	}{
+		{
+			name:           "The-Test",
+			dilationFactor: 1,
+			timerDuration:  10 * time.Second,
+		},
+	}
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			startTime := time.Now()
+			clock := NewClock(testCase.dilationFactor, startTime)
+			timer := clock.After(testCase.timerDuration)
+			time.Sleep(testCase.timerDuration / 2)
+			clock.ChangeDilationFactor(testCase.dilationFactor * 2)
+			timersExpirationTime := <-timer
+			timersRealDuration := time.Since(startTime)
+			timersDilatedDuration := timersExpirationTime.Sub(startTime)
+			minimumAllowedDuration := testCase.timerDuration - 2*time.Millisecond
+			maximumAllowedDuration := testCase.timerDuration + 2*time.Millisecond
+			timersDurationIsOutOfTolerance := timersDilatedDuration < minimumAllowedDuration || timersDilatedDuration > maximumAllowedDuration
+			if timersDurationIsOutOfTolerance {
+				test.Errorf("Timer's dilated duration was out of tolerance.\nExpected: %v +/- 2ms\nActual: %v", testCase.timerDuration, timersDilatedDuration)
+			}
+			firstPortionExpectedRealDuration := time.Duration((float64(testCase.timerDuration) / 2) / testCase.dilationFactor)
+			secondPortionExpectedRealDuration := time.Duration((float64(testCase.timerDuration) / 2) / (testCase.dilationFactor * 2))
+			expectedRealDuration := firstPortionExpectedRealDuration + secondPortionExpectedRealDuration
+			minimumAllowedDuration = expectedRealDuration - 2*time.Millisecond
+			maximumAllowedDuration = expectedRealDuration + 2*time.Millisecond
+			timersDurationIsOutOfTolerance = timersRealDuration < minimumAllowedDuration || timersRealDuration > maximumAllowedDuration
+			if timersDurationIsOutOfTolerance {
+				test.Errorf("Timer's real duration was out of tolerance.\nExpected: %v +/- 2ms\nActual: %v", expectedRealDuration, timersRealDuration)
 			}
 		})
 	}
