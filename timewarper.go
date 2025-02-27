@@ -14,6 +14,7 @@ type Clock struct {
 	dilationFactor float64
 	access         sync.Mutex
 	timers         []Timer
+	tickers        []Ticker
 	idCounter      int
 }
 
@@ -55,6 +56,10 @@ func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 		trueTimeRemaining := clock.timers[i].expectedTriggerTime.Sub(clock.trueEpoch)
 		newDilatedDuration := time.Duration(float64(trueTimeRemaining) / clock.dilationFactor)
 		clock.timers[i].trueTimer.Reset(newDilatedDuration)
+	}
+	for i := range clock.tickers {
+		newDilatedDuration := time.Duration(float64(clock.tickers[i].realPeriod) / newDilationFactor)
+		clock.tickers[i].realTicker.Reset(newDilatedDuration)
 	}
 }
 
@@ -136,4 +141,46 @@ type Timer struct {
 	expectedTriggerTime time.Time
 	outputChannel       chan time.Time
 	hasNotBeenTriggered bool
+}
+
+type Ticker struct {
+	id         int
+	realPeriod time.Duration
+	realTicker *time.Ticker
+	C          <-chan time.Time
+	clock      *Clock
+}
+
+func (clock *Clock) getDilationFactor() float64 {
+	clock.access.Lock()
+	defer clock.access.Unlock()
+	return clock.dilationFactor
+}
+
+func (clock *Clock) NewTicker(tickPeriod time.Duration) *Ticker {
+	clock.access.Lock()
+	defer clock.access.Unlock()
+	dilatedPeriod := time.Duration(float64(tickPeriod) / clock.dilationFactor)
+	realTicker := time.NewTicker(dilatedPeriod)
+	dilatedTicker := Ticker{
+		id:         clock.idCounter,
+		realPeriod: tickPeriod,
+		realTicker: realTicker,
+		C:          realTicker.C,
+		clock:      clock,
+	}
+	clock.tickers = append(clock.tickers, dilatedTicker)
+	clock.idCounter++
+	return &dilatedTicker
+}
+
+func (ticker *Ticker) Stop() {
+	ticker.realTicker.Stop()
+}
+
+func (ticker *Ticker) Reset(tickPeriod time.Duration) {
+	ticker.realPeriod = tickPeriod
+	dilationFactor := ticker.clock.getDilationFactor()
+	dilatedPeriod := time.Duration(float64(tickPeriod) / dilationFactor)
+	ticker.realTicker.Reset(dilatedPeriod)
 }

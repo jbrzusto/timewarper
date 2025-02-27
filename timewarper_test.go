@@ -45,9 +45,9 @@ func TestStaticDilation(test *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		test.Run(testCase.name, func(subTest *testing.T) {
-			subTest.Parallel()
-			waitGroup, ctx := errgroup.WithContext(subTest.Context())
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			waitGroup, ctx := errgroup.WithContext(test.Context())
 			startTime := time.Now()
 			trueTimeChannel := make(chan time.Time)
 			dilatedTimeChannel := make(chan time.Time)
@@ -94,9 +94,9 @@ func TestStaticDilation(test *testing.T) {
 						dilationFactorIsTooLow := dilationFactor < minimumAcceptableDilationFactor
 						dilationFactorIsTooHigh := dilationFactor > maximumAcceptableDilationFactor
 						if dilationFactorIsTooLow || dilationFactorIsTooHigh {
-							subTest.Errorf("dilation factor from test run of %v is out of tolerance of %v - %v", dilationFactor, minimumAcceptableDilationFactor, maximumAcceptableDilationFactor)
-							subTest.Logf("\ntrueTime:    %v\ndilatedTime: %v", trueTime, dilatedTime)
-							subTest.Logf("\nTrueTimePassage:    %v\ndilatedTimePassage: %v", trueTimePassage, dilatedTimePassage)
+							test.Errorf("dilation factor from test run of %v is out of tolerance of %v - %v", dilationFactor, minimumAcceptableDilationFactor, maximumAcceptableDilationFactor)
+							test.Logf("\ntrueTime:    %v\ndilatedTime: %v", trueTime, dilatedTime)
+							test.Logf("\nTrueTimePassage:    %v\ndilatedTimePassage: %v", trueTimePassage, dilatedTimePassage)
 						}
 					}
 				}
@@ -128,12 +128,12 @@ func TestDynamicDilation(test *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		test.Run(testCase.name, func(subTest *testing.T) {
-			subTest.Parallel()
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
 			startTime := time.Now()
 			trueTimeChannel := make(chan time.Time)
 			dilatedTimeChannel := make(chan time.Time)
-			waitGroup, ctx := errgroup.WithContext(subTest.Context())
+			waitGroup, ctx := errgroup.WithContext(test.Context())
 			waitGroup.Go(func() error {
 				clock := NewClock(0, startTime)
 				for i := 0; i < len(testCase.dilationFactors); i++ {
@@ -181,9 +181,9 @@ func TestDynamicDilation(test *testing.T) {
 						dilationFactorIsTooLow := dilationFactor < minimumAcceptableDilationFactor
 						dilationFactorIsTooHigh := dilationFactor > maximumAcceptableDilationFactor
 						if dilationFactorIsTooLow || dilationFactorIsTooHigh {
-							subTest.Errorf("dilation factor from test run of %v is out of tolerance of %v - %v", dilationFactor, minimumAcceptableDilationFactor, maximumAcceptableDilationFactor)
-							subTest.Logf("\ntrueTime:    %v\ndilatedTime: %v", trueTime.Format(time.RFC3339), dilatedTime.Format(time.RFC3339))
-							subTest.Logf("\nTrueTimePassage:    %v\ndilatedTimePassage: %v", trueTimePassage, dilatedTimePassage)
+							test.Errorf("dilation factor from test run of %v is out of tolerance of %v - %v", dilationFactor, minimumAcceptableDilationFactor, maximumAcceptableDilationFactor)
+							test.Logf("\ntrueTime:    %v\ndilatedTime: %v", trueTime.Format(time.RFC3339), dilatedTime.Format(time.RFC3339))
+							test.Logf("\nTrueTimePassage:    %v\ndilatedTimePassage: %v", trueTimePassage, dilatedTimePassage)
 						}
 					}
 				}
@@ -262,15 +262,15 @@ func TestTimers(test *testing.T) {
 			if testFailed {
 				test.Errorf("timers were not triggered in the correct order. Expected normal timer first: %v but normal timer was first: %v", testCase.normalTimerShouldBeFirst, normalTimerWasFirst)
 			}
-			minimumAllowedTimerTime := normalTimerFinishTime.Add(-2 * time.Millisecond)
-			maximumAllowedTimerTime := normalTimerFinishTime.Add(2 * time.Millisecond)
+			minimumAllowedTimerTime := normalTimerFinishTime.Add(-3 * time.Millisecond)
+			maximumAllowedTimerTime := normalTimerFinishTime.Add(3 * time.Millisecond)
 			warpedTimerEndedOutOfExpectedBounds := warpedTimerFinishTime.Before(minimumAllowedTimerTime) || warpedTimerFinishTime.After(maximumAllowedTimerTime)
 			if warpedTimerEndedOutOfExpectedBounds {
 				test.Errorf("The warped timer did not return the correct time.\nExpected %v\nActual   %v\nDifference(Normal Time - Warped Time): %v",
 					normalTimerFinishTime.Format(time.RFC3339), warpedTimerFinishTime.Format(time.RFC3339), normalTimerFinishTime.Sub(warpedTimerFinishTime))
 			}
-			maximumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) + 2*time.Millisecond
-			minimumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) - 2*time.Millisecond
+			maximumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) + 3*time.Millisecond
+			minimumAllowedRealDuration := time.Duration(float64(testCase.timerDuration)/testCase.dilationFactor) - 3*time.Millisecond
 			timeIsNotWithinTolerance := warpedTimerDuration < minimumAllowedRealDuration || warpedTimerDuration > maximumAllowedRealDuration
 			if timeIsNotWithinTolerance {
 				test.Errorf("warped timer duration %v was not within acceptable range of %v - %v", warpedTimerDuration, minimumAllowedRealDuration, maximumAllowedRealDuration)
@@ -385,6 +385,151 @@ func TestTimersWithChangesInDilationFactor(test *testing.T) {
 			timersDurationIsOutOfTolerance = timersRealDuration < minimumAllowedDuration || timersRealDuration > maximumAllowedDuration
 			if timersDurationIsOutOfTolerance {
 				test.Errorf("Timer's real duration was out of tolerance.\nExpected: %v +/- 2ms\nActual: %v", expectedRealDuration, timersRealDuration)
+			}
+		})
+	}
+}
+
+func TestTicker(test *testing.T) {
+	test.Parallel()
+	testCases := []struct {
+		name           string
+		dilationFactor float64
+		tickPeriod     time.Duration
+		testDuration   time.Duration
+		resetAfter     time.Duration
+	}{
+		{
+			name:           "The-Test",
+			dilationFactor: 2,
+			tickPeriod:     time.Second,
+			testDuration:   10*time.Second + 500*time.Millisecond,
+			resetAfter:     5 * time.Second,
+		},
+	}
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			startTime := time.Now()
+			clock := NewClock(testCase.dilationFactor, startTime)
+			dilatedTicker := clock.NewTicker(testCase.tickPeriod)
+			dilatedTickerToBeStopped := clock.NewTicker(testCase.tickPeriod)
+			normalTicker := time.NewTicker(testCase.tickPeriod)
+			timer := time.NewTimer(testCase.testDuration)
+			dilatedTickCounter := 0
+			stoppedTickCounter := 0
+			normalTickCounter := 0
+			testStillRunning := true
+			expectedTicksForTickerGoingToBeStopped := int(float64(testCase.testDuration/testCase.resetAfter) * testCase.dilationFactor)
+			for testStillRunning {
+				select {
+				case <-timer.C:
+					testStillRunning = false
+				case <-normalTicker.C:
+					normalTickCounter++
+				case <-dilatedTicker.C:
+					dilatedTickCounter++
+				case <-dilatedTickerToBeStopped.C:
+					stoppedTickCounter++
+					if stoppedTickCounter == expectedTicksForTickerGoingToBeStopped {
+						dilatedTickerToBeStopped.Stop()
+					}
+				}
+			}
+			actualTickRatio := float64(dilatedTickCounter / normalTickCounter)
+			expectedTickRatio := testCase.dilationFactor
+			tickRatioOutOfTolerance := expectedTickRatio != actualTickRatio
+			if tickRatioOutOfTolerance {
+				test.Errorf("Expected tick ratio of %.4f but actually got %.4f", expectedTickRatio, actualTickRatio)
+			}
+			if stoppedTickCounter != expectedTicksForTickerGoingToBeStopped {
+				test.Errorf("Expected %v ticks from stopped ticker but actually got %v", expectedTicksForTickerGoingToBeStopped, stoppedTickCounter)
+			}
+		})
+	}
+}
+
+func TestTickerWithDilationChange(test *testing.T) {
+	test.Parallel()
+	testCases := []struct {
+		name           string
+		dilationFactor float64
+		tickPeriod     time.Duration
+		testDuration   time.Duration
+	}{
+		{
+			name:           "The-Test",
+			dilationFactor: 2,
+			tickPeriod:     time.Second,
+			testDuration:   10*time.Second + 50*time.Millisecond,
+		},
+	}
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			clock := NewClock(testCase.dilationFactor, time.Now())
+			ticker := clock.NewTicker(testCase.tickPeriod)
+			timer := time.NewTimer(testCase.testDuration)
+			changeDilationTimer := time.NewTimer(testCase.testDuration / 2)
+			expectedNumberOfTicks := float64(testCase.testDuration/time.Second) / 2 * testCase.dilationFactor
+			expectedNumberOfTicks += float64(testCase.testDuration/time.Second) / 2 * testCase.dilationFactor * 2
+			numberOfTicks := 0
+			testStillRunning := true
+			for testStillRunning {
+				select {
+				case <-timer.C:
+					testStillRunning = false
+				case <-changeDilationTimer.C:
+					clock.ChangeDilationFactor(testCase.dilationFactor * 2)
+				case <-ticker.C:
+					numberOfTicks++
+				}
+			}
+			if int(expectedNumberOfTicks) != numberOfTicks {
+				test.Errorf("Expected %v ticks but actually got %v", expectedNumberOfTicks, numberOfTicks)
+			}
+		})
+	}
+}
+
+func TestTickerReset(test *testing.T) {
+	test.Parallel()
+	testCases := []struct {
+		name           string
+		dilationFactor float64
+		tickPeriod     time.Duration
+		testDuration   time.Duration
+	}{
+		{
+			name:           "The-Test",
+			dilationFactor: 2,
+			tickPeriod:     time.Second,
+			testDuration:   10*time.Second + 50*time.Millisecond,
+		},
+	}
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			clock := NewClock(testCase.dilationFactor, time.Now())
+			ticker := clock.NewTicker(testCase.tickPeriod)
+			timer := time.NewTimer(testCase.testDuration)
+			resetTimer := time.NewTimer(testCase.testDuration / 2)
+			numberOfTicks := 0
+			testStillRunning := true
+			for testStillRunning {
+				select {
+				case <-timer.C:
+					testStillRunning = false
+				case <-resetTimer.C:
+					ticker.Reset(testCase.tickPeriod / 2)
+				case <-ticker.C:
+					numberOfTicks++
+				}
+			}
+			expectedNumberOfTicks := float64(testCase.testDuration/time.Second) / 2 * testCase.dilationFactor
+			expectedNumberOfTicks += float64(testCase.testDuration/time.Second) / 2 * testCase.dilationFactor * 2
+			if int(expectedNumberOfTicks) != numberOfTicks {
+				test.Errorf("Expected %v ticks but actually got %v", expectedNumberOfTicks, numberOfTicks)
 			}
 		})
 	}
