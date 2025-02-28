@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// Clock is a time mechanism that also allows for dilating time to make it run faster or slower relative to real time
-// Clocks are safe for multi thread access
+// Clock is a time mechanism that also allows for dilating time to make it run faster or slower relative to real time.
+//
+// Clocks are safe for multithreaded access.
 type Clock struct {
 	trueEpoch      time.Time
 	dilatedEpoch   time.Time
@@ -18,11 +19,13 @@ type Clock struct {
 	idCounter      int
 }
 
-// NewClock creates a clock initialized with the given initialDilationFactor.
-// A factor of 1 runs in lock step with real time, while a factor of 0.5 would run at half the pace of real time and a factor of 2 would run at twice the speed of real time.
+// NewClock creates a new timewarper clock initialized with the given initialDilationFactor and given initialEpoch values.
+//
+// A dilation factor of 1 will have the produced timewarper clock running in lock step with real time, while a factor of 0.5 would run at half the pace of real time,
+// and a factor of 2 would run at twice the speed of real time.
 func NewClock(initialDilationFactor float64, initialEpoch time.Time) Clock {
 	return Clock{
-		trueEpoch:      initialEpoch,
+		trueEpoch:      time.Now(),
 		dilatedEpoch:   initialEpoch,
 		dilationFactor: initialDilationFactor,
 		timers:         make([]Timer, 0),
@@ -30,6 +33,7 @@ func NewClock(initialDilationFactor float64, initialEpoch time.Time) Clock {
 }
 
 // Now returns the time right now according to the timewarper clock.
+//
 // It will take into account all the time warping that has happened in its past.
 func (clock *Clock) Now() time.Time {
 	clock.access.Lock()
@@ -92,7 +96,7 @@ func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) time.Duration {
 			index := i
 			go func() {
 				timer := clock.timers[index]
-				timer.outputChannel <- timer.expectedTriggerTime
+				timer.C <- timer.expectedTriggerTime
 				clock.deleteTimer(timer.id)
 			}()
 		}
@@ -121,25 +125,32 @@ func (clock *Clock) After(desiredDuration time.Duration) <-chan time.Time {
 	newWarpedTimer := Timer{
 		id:                  clock.idCounter,
 		trueTimer:           newTrueTimer,
-		outputChannel:       make(chan time.Time),
+		C:                   make(chan time.Time),
 		expectedTriggerTime: now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(desiredDuration),
 		hasNotBeenTriggered: true,
 	}
 	go func() {
 		<-newWarpedTimer.trueTimer.C
 		dilatedTimeNow := clock.Now()
-		newWarpedTimer.outputChannel <- dilatedTimeNow
+		newWarpedTimer.C <- dilatedTimeNow
 	}()
 	clock.timers = append(clock.timers, newWarpedTimer)
 	clock.idCounter++
-	return newWarpedTimer.outputChannel
+	return newWarpedTimer.C
+}
+
+func (clock *Clock) Sleep(sleepDuration time.Duration) {
+	clock.access.Lock()
+	dilatedSleepDuration := time.Duration(float64(sleepDuration) / clock.dilationFactor)
+	clock.access.Unlock()
+	time.Sleep(dilatedSleepDuration)
 }
 
 type Timer struct {
 	id                  int
 	trueTimer           *time.Timer
 	expectedTriggerTime time.Time
-	outputChannel       chan time.Time
+	C                   chan time.Time
 	hasNotBeenTriggered bool
 }
 
@@ -183,4 +194,26 @@ func (ticker *Ticker) Reset(tickPeriod time.Duration) {
 	dilationFactor := ticker.clock.getDilationFactor()
 	dilatedPeriod := time.Duration(float64(tickPeriod) / dilationFactor)
 	ticker.realTicker.Reset(dilatedPeriod)
+}
+
+func (clock *Clock) NewTimer(desiredDuration time.Duration) *Timer {
+	clock.access.Lock()
+	defer clock.access.Unlock()
+	dilatedDuration := time.Duration(float64(desiredDuration) / clock.dilationFactor)
+	newTrueTimer := time.NewTimer(dilatedDuration)
+	newWarpedTimer := &Timer{
+		id:                  clock.idCounter,
+		trueTimer:           newTrueTimer,
+		C:                   make(chan time.Time),
+		expectedTriggerTime: now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(desiredDuration),
+		hasNotBeenTriggered: true,
+	}
+	go func() {
+		<-newWarpedTimer.trueTimer.C
+		dilatedTimeNow := clock.Now()
+		newWarpedTimer.C <- dilatedTimeNow
+	}()
+	clock.timers = append(clock.timers, *newWarpedTimer)
+	clock.idCounter++
+	return newWarpedTimer
 }

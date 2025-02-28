@@ -197,7 +197,7 @@ func TestDynamicDilation(test *testing.T) {
 	}
 }
 
-func TestTimers(test *testing.T) {
+func TestClockAfter(test *testing.T) {
 	test.Parallel()
 	testCases := []struct {
 		name                     string
@@ -533,4 +533,124 @@ func TestTickerReset(test *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSleep(test *testing.T) {
+	test.Parallel()
+	testCases := []struct {
+		name           string
+		dilationFactor float64
+		sleepDuration  time.Duration
+	}{
+		{
+			name:           "The-Test",
+			dilationFactor: 2,
+			sleepDuration:  10 * time.Second,
+		},
+	}
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			test.Parallel()
+			startTime := time.Now()
+			clock := NewClock(testCase.dilationFactor, time.Now())
+			clock.Sleep(testCase.sleepDuration)
+			elapsedTime := time.Since(startTime)
+			expectedElapsedTime := time.Duration(float64(testCase.sleepDuration) / testCase.dilationFactor)
+			minimumAllowedElapsedTime := expectedElapsedTime - time.Millisecond
+			maximumAllowedElapsedTime := expectedElapsedTime + time.Millisecond
+			elapsedTimeIsOutsideOfTolerances := elapsedTime < minimumAllowedElapsedTime || elapsedTime > maximumAllowedElapsedTime
+			if elapsedTimeIsOutsideOfTolerances {
+				test.Errorf("Expected elapsed time to be %v +/- 1ms but actually got %v", expectedElapsedTime, elapsedTime)
+			}
+		})
+	}
+}
+
+func TestTimers(test *testing.T) {
+	test.Parallel()
+	testCases := []struct {
+		name           string
+		dilationFactor float64
+		timerDuration  time.Duration
+		numberOfTimers int
+	}{
+		{
+			name:           "The-Test",
+			dilationFactor: 2,
+			timerDuration:  time.Second,
+		},
+	}
+	for _, testCase := range testCases {
+		startTime := time.Now()
+		clock := NewClock(testCase.dilationFactor, time.Now())
+		timer := clock.NewTimer(testCase.timerDuration)
+		dilatedTimerExpirationTime := <-timer.C
+		realElapsedTime := time.Since(startTime)
+		dilatedElapsedTime := dilatedTimerExpirationTime.Sub(startTime)
+		expectedElapsedTime := testCase.timerDuration
+		minimumAllowedElapsedTime := expectedElapsedTime - 2*time.Millisecond
+		maximumAllowedElapsedTime := expectedElapsedTime + 2*time.Millisecond
+		elapsedTimeNotInTolerance := dilatedElapsedTime < minimumAllowedElapsedTime || dilatedElapsedTime > maximumAllowedElapsedTime
+		if elapsedTimeNotInTolerance {
+			test.Errorf("Expected dilated elapsed time to be %v +/- 1ms but got %v", expectedElapsedTime, dilatedElapsedTime)
+		}
+		expectedElapsedTime = time.Duration(float64(testCase.timerDuration) / testCase.dilationFactor)
+		minimumAllowedElapsedTime = expectedElapsedTime - time.Millisecond
+		maximumAllowedElapsedTime = expectedElapsedTime + time.Millisecond
+		elapsedTimeNotInTolerance = realElapsedTime < minimumAllowedElapsedTime || realElapsedTime > maximumAllowedElapsedTime
+		if elapsedTimeNotInTolerance {
+			test.Errorf("Expected real elapsed time to be %v +/- 1ms but got %v", expectedElapsedTime, realElapsedTime)
+		}
+	}
+}
+
+func ExampleNewClock() {
+	startTime := time.Date(2025, 2, 27, 7, 0, 0, 0, time.Local)
+	realStartTime := time.Now()
+	clock := NewClock(7200, startTime)
+	timeForWork := startTime.Add(2 * time.Hour)
+	timeForLunch := timeForWork.Add(4 * time.Hour)
+	timeToGoBackToWork := timeForLunch.Add(time.Hour)
+	timeToGoHome := timeToGoBackToWork.Add(4 * time.Hour)
+	timeToGoToSleep := timeToGoHome.Add(5 * time.Hour)
+	timeToWakeUp := timeToGoToSleep.Add(8 * time.Hour)
+	goToWorkTimer := clock.NewTimer(timeForWork.Sub(startTime))
+	goToLunchTimer := clock.NewTimer(timeForLunch.Sub(startTime))
+	goBackToWorkTimer := clock.NewTimer(timeToGoBackToWork.Sub(startTime))
+	goHomeTimer := clock.NewTimer(timeToGoHome.Sub(startTime))
+	goToSleepTimer := clock.NewTimer(timeToGoToSleep.Sub(startTime))
+	wakeupTimer := clock.NewTimer(timeToWakeUp.Sub(startTime))
+	fmt.Printf("The time Bob work up: %v\n", startTime.Format(time.DateTime))
+	timeBobGotToWork := <-goToWorkTimer.C
+	fmt.Printf("The time Bob got to work: %v\n", timeBobGotToWork.Format(time.Kitchen))
+	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
+	timeBobWentToLunch := <-goToLunchTimer.C
+	fmt.Printf("The time Bob went to lunch: %v\n", timeBobWentToLunch.Format(time.Kitchen))
+	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
+	timeBobGotDoneWithLunch := <-goBackToWorkTimer.C
+	fmt.Printf("The time Bob was done with lunch: %v\n", timeBobGotDoneWithLunch.Format(time.Kitchen))
+	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
+	timeBobWentHome := <-goHomeTimer.C
+	fmt.Printf("The time Bob went home: %v\n", timeBobWentHome.Format(time.Kitchen))
+	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
+	timeBobWentToSleep := <-goToSleepTimer.C
+	fmt.Printf("The time Bob went to sleep: %v\n", timeBobWentToSleep.Format(time.Kitchen))
+	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
+	timeBobWokeUpTheNextDay := <-wakeupTimer.C
+	fmt.Printf("The time Bob woke up the next day: %v\n", timeBobWokeUpTheNextDay.Format(time.DateTime))
+	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
+	// Output:
+	// The time Bob work up: 2025-02-27 07:00:00
+	// The time Bob got to work: 9:00AM
+	// Real elapsed time: 1.00s
+	// The time Bob went to lunch: 1:00PM
+	// Real elapsed time: 3.00s
+	// The time Bob was done with lunch: 2:00PM
+	// Real elapsed time: 3.50s
+	// The time Bob went home: 6:00PM
+	// Real elapsed time: 5.50s
+	// The time Bob went to sleep: 11:00PM
+	// Real elapsed time: 8.00s
+	// The time Bob woke up the next day: 2025-02-28 07:00:00
+	// Real elapsed time: 12.00s
 }
