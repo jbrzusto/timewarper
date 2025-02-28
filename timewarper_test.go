@@ -391,7 +391,6 @@ func TestTimersWithChangesInDilationFactor(test *testing.T) {
 }
 
 func TestTicker(test *testing.T) {
-	test.Parallel()
 	testCases := []struct {
 		name           string
 		dilationFactor float64
@@ -400,16 +399,22 @@ func TestTicker(test *testing.T) {
 		resetAfter     time.Duration
 	}{
 		{
-			name:           "The-Test",
+			name:           "LowerSpeed",
 			dilationFactor: 2,
 			tickPeriod:     time.Second,
 			testDuration:   10*time.Second + 500*time.Millisecond,
 			resetAfter:     5 * time.Second,
 		},
+		{
+			name:           "Higher-Speed",
+			dilationFactor: 7150,
+			tickPeriod:     time.Second,
+			testDuration:   1*time.Second + time.Millisecond,
+			resetAfter:     time.Second,
+		},
 	}
 	for _, testCase := range testCases {
 		test.Run(testCase.name, func(test *testing.T) {
-			test.Parallel()
 			startTime := time.Now()
 			clock := NewClock(testCase.dilationFactor, startTime)
 			dilatedTicker := clock.NewTicker(testCase.tickPeriod)
@@ -445,6 +450,7 @@ func TestTicker(test *testing.T) {
 			if stoppedTickCounter != expectedTicksForTickerGoingToBeStopped {
 				test.Errorf("Expected %v ticks from stopped ticker but actually got %v", expectedTicksForTickerGoingToBeStopped, stoppedTickCounter)
 			}
+			fmt.Printf("%v", time.Second/7600)
 		})
 	}
 }
@@ -458,7 +464,7 @@ func TestTickerWithDilationChange(test *testing.T) {
 		testDuration   time.Duration
 	}{
 		{
-			name:           "The-Test",
+			name:           "Test",
 			dilationFactor: 2,
 			tickPeriod:     time.Second,
 			testDuration:   10*time.Second + 50*time.Millisecond,
@@ -653,4 +659,31 @@ func ExampleNewClock() {
 	// Real elapsed time: 8.00s
 	// The time Bob woke up the next day: 2025-02-28 07:00:00
 	// Real elapsed time: 12.00s
+}
+
+func ExampleClock_NewTicker() {
+	startTime := time.Now()
+	timeDilationFactor := float64(time.Hour / time.Second)
+	clock := NewClock(timeDilationFactor, startTime)
+	dilatedTicker := clock.NewTicker(time.Second)
+	normalTicker := time.NewTicker(time.Second)
+	normalTimer := time.NewTimer(2*time.Second + time.Millisecond)
+	numberOfNormalTicks := 0
+	numberOfDilatedTicks := 0
+	timerIsRunning := true
+	for timerIsRunning {
+		select {
+		case <-normalTicker.C:
+			numberOfNormalTicks++
+		case <-dilatedTicker.C:
+			numberOfDilatedTicks++
+		case <-normalTimer.C:
+			timerIsRunning = false
+		}
+	}
+	fmt.Printf("Number of ticks from dilated ticker: %d\n", numberOfDilatedTicks)
+	fmt.Printf("Number of ticks from normal ticker: %d\n", numberOfNormalTicks)
+	// Output:
+	// Number of ticks from dilated ticker: 3600
+	// Number of ticks from normal ticker: 2
 }
