@@ -152,6 +152,10 @@ type Timer struct {
 	expectedTriggerTime time.Time
 	C                   chan time.Time
 	hasNotBeenTriggered bool
+	cancel              chan bool
+	clock               *Clock
+	stopped             bool
+	access              sync.Mutex
 }
 
 type Ticker struct {
@@ -207,13 +211,43 @@ func (clock *Clock) NewTimer(desiredDuration time.Duration) *Timer {
 		C:                   make(chan time.Time),
 		expectedTriggerTime: now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(desiredDuration),
 		hasNotBeenTriggered: true,
+		cancel:              make(chan bool),
+		clock:               clock,
 	}
-	go func() {
-		<-newWarpedTimer.trueTimer.C
-		dilatedTimeNow := clock.Now()
-		newWarpedTimer.C <- dilatedTimeNow
-	}()
+	go newWarpedTimer.waitForTrueTimer()
 	clock.timers = append(clock.timers, *newWarpedTimer)
 	clock.idCounter++
 	return newWarpedTimer
+}
+
+func (timer *Timer) waitForTrueTimer() {
+	select {
+	case <-timer.trueTimer.C:
+		dilatedTimeNow := timer.clock.Now()
+		timer.C <- dilatedTimeNow
+	case <-timer.cancel:
+	}
+	timer.access.Lock()
+	defer timer.access.Unlock()
+	timer.stopped = true
+}
+
+func (timer *Timer) Stop() {
+	timer.access.Lock()
+	defer timer.access.Unlock()
+	timer.cancel <- true
+	timer.trueTimer.Stop()
+	timer.stopped = true
+}
+
+func (timer *Timer) Reset(desiredDuration time.Duration) {
+	timer.access.Lock()
+	defer timer.access.Unlock()
+	dilatedDuration := time.Duration(float64(desiredDuration) / timer.clock.dilationFactor)
+	timer.expectedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(desiredDuration)
+	timer.trueTimer.Reset(dilatedDuration)
+	if timer.stopped {
+		timer.stopped = false
+		go timer.waitForTrueTimer()
+	}
 }
