@@ -22,11 +22,11 @@ type Clock struct {
 //
 // A dilation factor of 1 will have the produced timewarper clock running in lock step with real time, while a factor of 0.5 would run at half the pace of real time,
 // and a factor of 2 would run at twice the speed of real time.
-func NewClock(initialDilationFactor float64, initialEpoch time.Time) Clock {
+func NewClock(dilationFactor float64, initialEpoch time.Time) Clock {
 	return Clock{
 		trueEpoch:      time.Now(),
 		dilatedEpoch:   initialEpoch,
-		dilationFactor: initialDilationFactor,
+		dilationFactor: dilationFactor,
 		timers:         make([]*Timer, 0),
 	}
 }
@@ -52,45 +52,48 @@ func now(trueEpoch, dilatedEpoch time.Time, dilationFactor float64) time.Time {
 func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 	clock.access.Lock()
 	defer clock.access.Unlock()
-	e := clock.dilatedEpoch
+	oldDilatedEpoch := clock.dilatedEpoch
+	oldDilationFactor := clock.dilationFactor
 	clock.dilatedEpoch = now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor)
 	clock.trueEpoch = time.Now()
 	clock.dilationFactor = newDilationFactor
 	for i := range clock.timers {
-		dilatedTimeRemaining := clock.timers[i].expectedTriggerTime.Sub(e)
-		newTrueDuration := time.Duration(float64(dilatedTimeRemaining) / clock.dilationFactor)
-		clock.timers[i].trueTimer.Reset(newTrueDuration)
+		oldDilatedTimeRemaining := clock.timers[i].dilatedTriggerTime.Sub(oldDilatedEpoch)
+		oldTrueTimeRemaining := time.Duration(float64(oldDilatedTimeRemaining) / oldDilationFactor)
+		newDilatedDuration := time.Duration(float64(oldTrueTimeRemaining) * newDilationFactor)
+		clock.timers[i].Reset(newDilatedDuration)
 	}
 	for i := range clock.tickers {
-		newDilatedDuration := time.Duration(float64(clock.tickers[i].realPeriod) / newDilationFactor)
-		clock.tickers[i].realTicker.Reset(newDilatedDuration)
+		newDilatedDuration := time.Duration(float64(clock.tickers[i].dilatedPeriod) / newDilationFactor)
+		clock.tickers[i].trueTicker.Reset(newDilatedDuration)
 	}
 }
 
 // JumpToTheFuture will use the given jumpDistance to move the clock forward that far.
 //
-// For any timers that will expire before the new time, their expectedTriggerTime is sent
+// For any timers that will expire before the new time, their dilatedTriggerTime is sent
 // on their channel.
 //
 // The remaining timers will have their trueTimer reset to a new duration, so that they
 // will trigger at the appropriate warped time.
-func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) {
+func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv time.Duration) {
 	clock.access.Lock()
 	defer clock.access.Unlock()
-	theNewDilatedEpoch := clock.dilatedEpoch.Add(jumpDistance)
+	newDilatedEpoch := clock.dilatedEpoch.Add(jumpDistance)
 	for i := 0; i < len(clock.timers); i++ {
-		dur := clock.timers[i].expectedTriggerTime.Sub(theNewDilatedEpoch)
+		dur := clock.timers[i].dilatedTriggerTime.Sub(newDilatedEpoch)
 		if dur > 0 {
 			clock.timers[i].Reset(dur)
 		} else {
 			go func(j int) {
 				timer := clock.timers[j]
 				timer.Stop()
-				timer.C <- timer.expectedTriggerTime
+				timer.C <- timer.dilatedTriggerTime
 			}(i)
 		}
 	}
-	clock.dilatedEpoch = theNewDilatedEpoch
+	clock.dilatedEpoch = newDilatedEpoch
+	return
 }
 
 func (clock *Clock) deleteTimer(timerId int) {
@@ -108,17 +111,17 @@ func (clock *Clock) After(desiredDuration time.Duration) <-chan time.Time {
 	return clock.NewTimer(desiredDuration).C
 }
 
-func (clock *Clock) Sleep(sleepDuration time.Duration) {
+func (clock *Clock) Sleep(dilatedSleepDuration time.Duration) {
 	clock.access.Lock()
-	dilatedSleepDuration := time.Duration(float64(sleepDuration) / clock.dilationFactor)
+	trueSleepDuration := time.Duration(float64(dilatedSleepDuration) / clock.dilationFactor)
 	clock.access.Unlock()
-	time.Sleep(dilatedSleepDuration)
+	time.Sleep(trueSleepDuration)
 }
 
 type Timer struct {
 	id                  int
 	trueTimer           *time.Timer
-	expectedTriggerTime time.Time
+	dilatedTriggerTime  time.Time
 	C                   chan time.Time
 	hasNotBeenTriggered bool
 	cancel              chan bool
@@ -128,11 +131,11 @@ type Timer struct {
 }
 
 type Ticker struct {
-	id         int
-	realPeriod time.Duration
-	realTicker *time.Ticker
-	C          <-chan time.Time
-	clock      *Clock
+	id            int
+	dilatedPeriod time.Duration
+	trueTicker    *time.Ticker
+	C             <-chan time.Time
+	clock         *Clock
 }
 
 func (clock *Clock) getDilationFactor() float64 {
@@ -141,17 +144,17 @@ func (clock *Clock) getDilationFactor() float64 {
 	return clock.dilationFactor
 }
 
-func (clock *Clock) NewTicker(tickPeriod time.Duration) *Ticker {
+func (clock *Clock) NewTicker(dilatedPeriod time.Duration) *Ticker {
 	clock.access.Lock()
 	defer clock.access.Unlock()
-	dilatedPeriod := time.Duration(float64(tickPeriod) / clock.dilationFactor)
-	realTicker := time.NewTicker(dilatedPeriod)
+	truePeriod := time.Duration(float64(dilatedPeriod) / clock.dilationFactor)
+	trueTicker := time.NewTicker(truePeriod)
 	dilatedTicker := Ticker{
-		id:         clock.idCounter,
-		realPeriod: tickPeriod,
-		realTicker: realTicker,
-		C:          realTicker.C,
-		clock:      clock,
+		id:            clock.idCounter,
+		dilatedPeriod: dilatedPeriod,
+		trueTicker:    trueTicker,
+		C:             trueTicker.C,
+		clock:         clock,
 	}
 	clock.tickers = append(clock.tickers, &dilatedTicker)
 	clock.idCounter++
@@ -159,29 +162,31 @@ func (clock *Clock) NewTicker(tickPeriod time.Duration) *Ticker {
 }
 
 func (ticker *Ticker) Stop() {
-	ticker.realTicker.Stop()
+	ticker.trueTicker.Stop()
 }
 
-func (ticker *Ticker) Reset(tickPeriod time.Duration) {
-	ticker.realPeriod = tickPeriod
+func (ticker *Ticker) Reset(dilatedPeriod time.Duration) {
+	ticker.dilatedPeriod = dilatedPeriod
 	dilationFactor := ticker.clock.getDilationFactor()
-	dilatedPeriod := time.Duration(float64(tickPeriod) / dilationFactor)
-	ticker.realTicker.Reset(dilatedPeriod)
+	truePeriod := time.Duration(float64(dilatedPeriod) / dilationFactor)
+	ticker.trueTicker.Reset(truePeriod)
 }
 
-func (clock *Clock) NewTimer(desiredDuration time.Duration) *Timer {
+func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 	clock.access.Lock()
 	defer clock.access.Unlock()
-	dilatedDuration := time.Duration(float64(desiredDuration) / clock.dilationFactor)
-	newTrueTimer := time.NewTimer(dilatedDuration)
+	trueDuration := time.Duration(float64(dilatedDuration) / clock.dilationFactor)
+	//	log.Printf("starting true timer with duration %v for dilated duration %v with dilationFactor = %g\n", trueDuration, dilatedDuration, clock.dilationFactor)
+	newTrueTimer := time.NewTimer(trueDuration)
 	newWarpedTimer := &Timer{
 		id:                  clock.idCounter,
 		trueTimer:           newTrueTimer,
 		C:                   make(chan time.Time),
-		expectedTriggerTime: now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(desiredDuration),
+		dilatedTriggerTime:  now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(dilatedDuration),
 		hasNotBeenTriggered: true,
 		cancel:              make(chan bool),
 		clock:               clock,
+		stopped:             true,
 	}
 	go newWarpedTimer.waitForTrueTimer()
 	clock.timers = append(clock.timers, newWarpedTimer)
@@ -198,7 +203,7 @@ func (timer *Timer) waitForTrueTimer() {
 	timer.stopped = false
 	select {
 	case <-timer.trueTimer.C:
-		dilatedTimeNow := timer.clock.Now()
+		dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
 		timer.C <- dilatedTimeNow
 	case <-timer.cancel:
 	}
@@ -210,12 +215,12 @@ func (timer *Timer) Stop() {
 	timer.cancel <- true
 }
 
-func (timer *Timer) Reset(desiredDuration time.Duration) {
+func (timer *Timer) Reset(dilatedDuration time.Duration) {
 	timer.cancel <- true
 	timer.access.Lock()
 	defer timer.access.Unlock()
-	dilatedDuration := time.Duration(float64(desiredDuration) / timer.clock.dilationFactor)
-	timer.expectedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(desiredDuration)
-	timer.trueTimer.Reset(dilatedDuration)
+	trueDuration := time.Duration(float64(dilatedDuration) / timer.clock.dilationFactor)
+	timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(dilatedDuration)
+	timer.trueTimer.Reset(trueDuration)
 	go timer.waitForTrueTimer()
 }

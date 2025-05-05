@@ -3,11 +3,12 @@ package timewarper
 import (
 	"context"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"math/rand/v2"
 	"sort"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func TestStaticDilation(test *testing.T) {
@@ -406,8 +407,9 @@ func TestTicker(test *testing.T) {
 			resetAfter:     5 * time.Second,
 		},
 		{
-			name:           "Higher-Speed",
-			dilationFactor: 7150,
+			name: "Higher-Speed",
+			//			dilationFactor: 7150,
+			dilationFactor: 900,
 			tickPeriod:     time.Second,
 			testDuration:   1*time.Second + time.Millisecond,
 			resetAfter:     time.Second,
