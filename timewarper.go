@@ -52,13 +52,14 @@ func now(trueEpoch, dilatedEpoch time.Time, dilationFactor float64) time.Time {
 func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 	clock.access.Lock()
 	defer clock.access.Unlock()
+	e := clock.dilatedEpoch
 	clock.dilatedEpoch = now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor)
 	clock.trueEpoch = time.Now()
 	clock.dilationFactor = newDilationFactor
 	for i := range clock.timers {
-		trueTimeRemaining := clock.timers[i].expectedTriggerTime.Sub(clock.trueEpoch)
-		newDilatedDuration := time.Duration(float64(trueTimeRemaining) / clock.dilationFactor)
-		clock.timers[i].trueTimer.Reset(newDilatedDuration)
+		dilatedTimeRemaining := clock.timers[i].expectedTriggerTime.Sub(e)
+		newTrueDuration := time.Duration(float64(dilatedTimeRemaining) / clock.dilationFactor)
+		clock.timers[i].trueTimer.Reset(newTrueDuration)
 	}
 	for i := range clock.tickers {
 		newDilatedDuration := time.Duration(float64(clock.tickers[i].realPeriod) / newDilationFactor)
