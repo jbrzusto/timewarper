@@ -1,7 +1,6 @@
 package timewarper
 
 import (
-	"sort"
 	"sync"
 	"time"
 )
@@ -14,8 +13,8 @@ type Clock struct {
 	dilatedEpoch   time.Time
 	dilationFactor float64
 	access         sync.Mutex
-	timers         []Timer
-	tickers        []Ticker
+	timers         []*Timer
+	tickers        []*Ticker
 	idCounter      int
 }
 
@@ -28,7 +27,7 @@ func NewClock(initialDilationFactor float64, initialEpoch time.Time) Clock {
 		trueEpoch:      time.Now(),
 		dilatedEpoch:   initialEpoch,
 		dilationFactor: initialDilationFactor,
-		timers:         make([]Timer, 0),
+		timers:         make([]*Timer, 0),
 	}
 }
 
@@ -69,41 +68,28 @@ func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 
 // JumpToTheFuture will use the given jumpDistance to move the clock forward that far.
 //
-// A check will be made for any timers that will expire before the new time.
-// If one is found, it will be triggered as normal, and the clock will jump to that point in time.
-// The duration returned will be the distance that was jumped.
-// It is up to you to handle these timers being triggered, it's your program after all.
-// The duration returned by JumpToTheFuture can be compared to the duration passed in and if they are not the same then you will know a timer was triggered.
+// For any timers that will expire before the new time, their expectedTriggerTime is sent
+// on their channel.
 //
-// Example: It is 12:00 according to clock.Now(), and you want to jump an hour into the future, but there is a timer set to expire in 30 minutes.
-// That timer be triggered and the time that will come out of its channel will be 12:30.
-// JumpToTheFuture will return a duration of 30 minutes, and clock.Now() will return a time of 12:30
-// You must handle, or not, it's your program, that timer and then call JumpToTheFuture again with your original jump distance minus the distance returned by
-// JumpToTheFuture if you wish to complete the jump to your originally desired future time.
-func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) time.Duration {
+// The remaining timers will have their trueTimer reset to a new duration, so that they
+// will trigger at the appropriate warped time.
+func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	theNewDilatedEpoch := clock.dilatedEpoch.Add(jumpDistance)
-	sort.Slice(clock.timers, func(i, j int) bool {
-		return clock.timers[i].expectedTriggerTime.Before(clock.timers[j].expectedTriggerTime)
-	})
 	for i := 0; i < len(clock.timers); i++ {
-		if clock.timers[i].expectedTriggerTime.After(theNewDilatedEpoch) {
-			break
-		}
-		if clock.timers[i].expectedTriggerTime.Before(theNewDilatedEpoch.Add(1)) {
-			theNewDilatedEpoch = clock.timers[i].expectedTriggerTime
-			index := i
-			go func() {
-				timer := clock.timers[index]
+		dur := clock.timers[i].expectedTriggerTime.Sub(theNewDilatedEpoch)
+		if dur > 0 {
+			clock.timers[i].Reset(dur)
+		} else {
+			go func(j int) {
+				timer := clock.timers[j]
+				timer.Stop()
 				timer.C <- timer.expectedTriggerTime
-				clock.deleteTimer(timer.id)
-			}()
+			}(i)
 		}
 	}
-	actualDistanceJumped := theNewDilatedEpoch.Sub(clock.dilatedEpoch)
 	clock.dilatedEpoch = theNewDilatedEpoch
-	return actualDistanceJumped
 }
 
 func (clock *Clock) deleteTimer(timerId int) {
@@ -118,25 +104,7 @@ func (clock *Clock) deleteTimer(timerId int) {
 }
 
 func (clock *Clock) After(desiredDuration time.Duration) <-chan time.Time {
-	clock.access.Lock()
-	defer clock.access.Unlock()
-	dilatedDuration := time.Duration(float64(desiredDuration) / clock.dilationFactor)
-	newTrueTimer := time.NewTimer(dilatedDuration)
-	newWarpedTimer := Timer{
-		id:                  clock.idCounter,
-		trueTimer:           newTrueTimer,
-		C:                   make(chan time.Time),
-		expectedTriggerTime: now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(desiredDuration),
-		hasNotBeenTriggered: true,
-	}
-	go func() {
-		<-newWarpedTimer.trueTimer.C
-		dilatedTimeNow := clock.Now()
-		newWarpedTimer.C <- dilatedTimeNow
-	}()
-	clock.timers = append(clock.timers, newWarpedTimer)
-	clock.idCounter++
-	return newWarpedTimer.C
+	return clock.NewTimer(desiredDuration).C
 }
 
 func (clock *Clock) Sleep(sleepDuration time.Duration) {
@@ -184,7 +152,7 @@ func (clock *Clock) NewTicker(tickPeriod time.Duration) *Ticker {
 		C:          realTicker.C,
 		clock:      clock,
 	}
-	clock.tickers = append(clock.tickers, dilatedTicker)
+	clock.tickers = append(clock.tickers, &dilatedTicker)
 	clock.idCounter++
 	return &dilatedTicker
 }
@@ -215,39 +183,38 @@ func (clock *Clock) NewTimer(desiredDuration time.Duration) *Timer {
 		clock:               clock,
 	}
 	go newWarpedTimer.waitForTrueTimer()
-	clock.timers = append(clock.timers, *newWarpedTimer)
+	clock.timers = append(clock.timers, newWarpedTimer)
 	clock.idCounter++
 	return newWarpedTimer
 }
 
 func (timer *Timer) waitForTrueTimer() {
+	timer.access.Lock()
+	defer timer.access.Unlock()
+	if !timer.stopped {
+		return
+	}
+	timer.stopped = false
 	select {
 	case <-timer.trueTimer.C:
 		dilatedTimeNow := timer.clock.Now()
 		timer.C <- dilatedTimeNow
 	case <-timer.cancel:
 	}
-	timer.access.Lock()
-	defer timer.access.Unlock()
-	timer.stopped = true
-}
-
-func (timer *Timer) Stop() {
-	timer.access.Lock()
-	defer timer.access.Unlock()
-	timer.cancel <- true
 	timer.trueTimer.Stop()
 	timer.stopped = true
 }
 
+func (timer *Timer) Stop() {
+	timer.cancel <- true
+}
+
 func (timer *Timer) Reset(desiredDuration time.Duration) {
+	timer.cancel <- true
 	timer.access.Lock()
 	defer timer.access.Unlock()
 	dilatedDuration := time.Duration(float64(desiredDuration) / timer.clock.dilationFactor)
 	timer.expectedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(desiredDuration)
 	timer.trueTimer.Reset(dilatedDuration)
-	if timer.stopped {
-		timer.stopped = false
-		go timer.waitForTrueTimer()
-	}
+	go timer.waitForTrueTimer()
 }
