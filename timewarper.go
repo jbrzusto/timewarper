@@ -1,7 +1,6 @@
 package timewarper
 
 import (
-	"log"
 	"sync"
 	"time"
 )
@@ -185,7 +184,7 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	trueDuration := time.Duration(float64(dilatedDuration) / clock.dilationFactor)
-	log.Printf("starting true timer %d with duration %v for dilated duration %v with dilationFactor = %g\n", clock.idCounter, trueDuration, dilatedDuration, clock.dilationFactor)
+	//	log.Printf("starting true timer %d with duration %v for dilated duration %v with dilationFactor = %g\n", clock.idCounter, trueDuration, dilatedDuration, clock.dilationFactor)
 	newTrueTimer := time.NewTimer(trueDuration)
 	newWarpedTimer := &Timer{
 		id:                  clock.idCounter,
@@ -205,7 +204,7 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 }
 
 func (timer *Timer) waitForTrueTimer() {
-	log.Printf("called waitForTrueTimer on timer %d, to trigger at %v, true time %v", timer.id, timer.dilatedTriggerTime, time.Now().Add(timer.trueDuration))
+	//	log.Printf("called waitForTrueTimer on timer %d, to trigger at %v, true time %v", timer.id, timer.dilatedTriggerTime, time.Now().Add(timer.trueDuration))
 	timer.access.Lock()
 	defer timer.access.Unlock()
 	if timer.stopped {
@@ -215,9 +214,9 @@ func (timer *Timer) waitForTrueTimer() {
 	case <-timer.trueTimer.C:
 		dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
 		timer.C <- dilatedTimeNow
-		log.Printf("true timer %d triggered at %v; expected at %v", timer.id, dilatedTimeNow, timer.dilatedTriggerTime)
+		//		log.Printf("true timer %d triggered at %v; expected at %v", timer.id, dilatedTimeNow, timer.dilatedTriggerTime)
 	case <-timer.cancel:
-		log.Printf("cancelled waitForTrueTimer on timer %d", timer.id)
+		//		log.Printf("cancelled waitForTrueTimer on timer %d", timer.id)
 	}
 	timer.trueTimer.Stop()
 	timer.stopped = true

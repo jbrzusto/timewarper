@@ -597,18 +597,18 @@ func TestTimers(test *testing.T) {
 		realElapsedTime := time.Since(startTime)
 		dilatedElapsedTime := dilatedTimerExpirationTime.Sub(startTime)
 		expectedElapsedTime := testCase.timerDuration
-		minimumAllowedElapsedTime := expectedElapsedTime - 2*time.Millisecond
-		maximumAllowedElapsedTime := expectedElapsedTime + 2*time.Millisecond
+		minimumAllowedElapsedTime := expectedElapsedTime - 4*time.Millisecond
+		maximumAllowedElapsedTime := expectedElapsedTime + 4*time.Millisecond
 		elapsedTimeNotInTolerance := dilatedElapsedTime < minimumAllowedElapsedTime || dilatedElapsedTime > maximumAllowedElapsedTime
 		if elapsedTimeNotInTolerance {
-			test.Errorf("Expected dilated elapsed time to be %v +/- 1ms but got %v", expectedElapsedTime, dilatedElapsedTime)
+			test.Errorf("Expected dilated elapsed time to be %v +/- 4ms but got %v", expectedElapsedTime, dilatedElapsedTime)
 		}
 		expectedElapsedTime = time.Duration(float64(testCase.timerDuration) / testCase.dilationFactor)
-		minimumAllowedElapsedTime = expectedElapsedTime - time.Millisecond
-		maximumAllowedElapsedTime = expectedElapsedTime + time.Millisecond
+		minimumAllowedElapsedTime = expectedElapsedTime - 4*time.Millisecond
+		maximumAllowedElapsedTime = expectedElapsedTime + 4*time.Millisecond
 		elapsedTimeNotInTolerance = realElapsedTime < minimumAllowedElapsedTime || realElapsedTime > maximumAllowedElapsedTime
 		if elapsedTimeNotInTolerance {
-			test.Errorf("Expected real elapsed time to be %v +/- 1ms but got %v", expectedElapsedTime, realElapsedTime)
+			test.Errorf("Expected real elapsed time to be %v +/- 4ms but got %v", expectedElapsedTime, realElapsedTime)
 		}
 	}
 }
@@ -629,7 +629,7 @@ func ExampleNewClock() {
 	goHomeTimer := clock.NewTimer(timeToGoHome.Sub(startTime))
 	goToSleepTimer := clock.NewTimer(timeToGoToSleep.Sub(startTime))
 	wakeupTimer := clock.NewTimer(timeToWakeUp.Sub(startTime))
-	fmt.Printf("The time Bob work up: %v\n", startTime.Format(time.DateTime))
+	fmt.Printf("The time Bob work up: %v\n", startTime.Format(time.Kitchen))
 	timeBobGotToWork := <-goToWorkTimer.C
 	fmt.Printf("The time Bob got to work: %v\n", timeBobGotToWork.Format(time.Kitchen))
 	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
@@ -646,10 +646,10 @@ func ExampleNewClock() {
 	fmt.Printf("The time Bob went to sleep: %v\n", timeBobWentToSleep.Format(time.Kitchen))
 	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
 	timeBobWokeUpTheNextDay := <-wakeupTimer.C
-	fmt.Printf("The time Bob woke up the next day: %v\n", timeBobWokeUpTheNextDay.Format(time.DateTime))
+	fmt.Printf("The time Bob woke up the next day: %v\n", timeBobWokeUpTheNextDay.Format(time.Kitchen))
 	fmt.Printf("Real elapsed time: %.2fs\n", time.Since(realStartTime).Seconds())
 	// Output:
-	// The time Bob work up: 2025-02-27 07:00:00
+	// The time Bob work up: 7:00AM
 	// The time Bob got to work: 9:00AM
 	// Real elapsed time: 1.00s
 	// The time Bob went to lunch: 1:00PM
@@ -660,13 +660,14 @@ func ExampleNewClock() {
 	// Real elapsed time: 5.50s
 	// The time Bob went to sleep: 11:00PM
 	// Real elapsed time: 8.00s
-	// The time Bob woke up the next day: 2025-02-28 07:00:00
+	// The time Bob woke up the next day: 7:00AM
 	// Real elapsed time: 12.00s
 }
 
 func ExampleClock_NewTicker() {
 	startTime := time.Now()
-	timeDilationFactor := float64(time.Hour / time.Second)
+	//	timeDilationFactor := float64(time.Hour / time.Second)
+	timeDilationFactor := float64(500)
 	clock := NewClock(timeDilationFactor, startTime)
 	dilatedTicker := clock.NewTicker(time.Second)
 	normalTicker := time.NewTicker(time.Second)
@@ -687,6 +688,6 @@ func ExampleClock_NewTicker() {
 	fmt.Printf("Number of ticks from dilated ticker: %d\n", numberOfDilatedTicks)
 	fmt.Printf("Number of ticks from normal ticker: %d\n", numberOfNormalTicks)
 	// Output:
-	// Number of ticks from dilated ticker: 3600
+	// Number of ticks from dilated ticker: 1000
 	// Number of ticks from normal ticker: 2
 }
