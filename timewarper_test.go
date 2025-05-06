@@ -616,7 +616,7 @@ func TestTimers(test *testing.T) {
 func ExampleNewClock() {
 	startTime := time.Date(2025, 2, 27, 7, 0, 0, 0, time.Local)
 	realStartTime := time.Now()
-	clock := NewClock(2400, startTime)
+	clock := NewClock(7200, startTime)
 	timeForWork := startTime.Add(2 * time.Hour)
 	timeForLunch := timeForWork.Add(4 * time.Hour)
 	timeToGoBackToWork := timeForLunch.Add(time.Hour)
