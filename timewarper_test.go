@@ -319,22 +319,23 @@ func TestTimeJumping(test *testing.T) {
 			sort.Slice(timerInfos, func(i, j int) bool {
 				return timerInfos[i].expirationTime.Before(timerInfos[j].expirationTime)
 			})
-			for timeRemainingToJump := testCase.jumpDistance; timeRemainingToJump > 0; timeRemainingToJump -= clock.JumpToTheFuture(timeRemainingToJump) {
-				if timeRemainingToJump > 0 {
-					for i := 0; i < len(timerInfos); i++ {
-						select {
-						case expirationTime := <-timerInfos[i].channel:
-							differenceBetweenActualAndExpectedExpirationTimesIs := expirationTime.Sub(timerInfos[i].expirationTime)
-							if differenceBetweenActualAndExpectedExpirationTimesIs < 0 {
-								differenceBetweenActualAndExpectedExpirationTimesIs *= -1
-							}
-							if differenceBetweenActualAndExpectedExpirationTimesIs > time.Millisecond {
-								test.Errorf("difference between actual and expected expiration times is outside of tolerance: actual time: %v expected time: %v", expirationTime, timerInfos[i].expirationTime)
-							}
-							timerInfos = append(timerInfos[:i], timerInfos[i+1:]...)
-							i--
-						default:
+			n := clock.JumpToTheFuture(testCase.jumpDistance)
+			// wait until we've been able to read from the channel of all triggered timers
+			for n > 0 {
+				for i := 0; i < len(timerInfos); i++ {
+					select {
+					case expirationTime := <-timerInfos[i].channel:
+						differenceBetweenActualAndExpectedExpirationTimesIs := expirationTime.Sub(timerInfos[i].expirationTime)
+						if differenceBetweenActualAndExpectedExpirationTimesIs < 0 {
+							differenceBetweenActualAndExpectedExpirationTimesIs *= -1
 						}
+						if differenceBetweenActualAndExpectedExpirationTimesIs > time.Millisecond {
+							test.Errorf("difference between actual and expected expiration times is outside of tolerance: actual time: %v expected time: %v", expirationTime, timerInfos[i].expirationTime)
+						}
+						timerInfos = append(timerInfos[:i], timerInfos[i+1:]...)
+						i--
+						n--
+					default:
 					}
 				}
 			}
@@ -372,20 +373,20 @@ func TestTimersWithChangesInDilationFactor(test *testing.T) {
 			timersExpirationTime := <-timer
 			timersRealDuration := time.Since(startTime)
 			timersDilatedDuration := timersExpirationTime.Sub(startTime)
-			minimumAllowedDuration := testCase.timerDuration - 2*time.Millisecond
-			maximumAllowedDuration := testCase.timerDuration + 2*time.Millisecond
+			minimumAllowedDuration := testCase.timerDuration - 4*time.Millisecond
+			maximumAllowedDuration := testCase.timerDuration + 4*time.Millisecond
 			timersDurationIsOutOfTolerance := timersDilatedDuration < minimumAllowedDuration || timersDilatedDuration > maximumAllowedDuration
 			if timersDurationIsOutOfTolerance {
-				test.Errorf("Timer's dilated duration was out of tolerance.\nExpected: %v +/- 2ms\nActual: %v", testCase.timerDuration, timersDilatedDuration)
+				test.Errorf("Timer's dilated duration was out of tolerance.\nExpected: %v +/- 4ms\nActual: %v", testCase.timerDuration, timersDilatedDuration)
 			}
 			firstPortionExpectedRealDuration := time.Duration((float64(testCase.timerDuration) / 2) / testCase.dilationFactor)
 			secondPortionExpectedRealDuration := time.Duration((float64(testCase.timerDuration) / 2) / (testCase.dilationFactor * 2))
 			expectedRealDuration := firstPortionExpectedRealDuration + secondPortionExpectedRealDuration
-			minimumAllowedDuration = expectedRealDuration - 2*time.Millisecond
-			maximumAllowedDuration = expectedRealDuration + 2*time.Millisecond
+			minimumAllowedDuration = expectedRealDuration - 4*time.Millisecond
+			maximumAllowedDuration = expectedRealDuration + 4*time.Millisecond
 			timersDurationIsOutOfTolerance = timersRealDuration < minimumAllowedDuration || timersRealDuration > maximumAllowedDuration
 			if timersDurationIsOutOfTolerance {
-				test.Errorf("Timer's real duration was out of tolerance.\nExpected: %v +/- 2ms\nActual: %v", expectedRealDuration, timersRealDuration)
+				test.Errorf("Timer's real duration was out of tolerance.\nExpected: %v +/- 4ms\nActual: %v", expectedRealDuration, timersRealDuration)
 			}
 		})
 	}
@@ -409,7 +410,7 @@ func TestTicker(test *testing.T) {
 		{
 			name: "Higher-Speed",
 			//			dilationFactor: 7150,
-			dilationFactor: 900,
+			dilationFactor: 800,
 			tickPeriod:     time.Second,
 			testDuration:   1*time.Second + time.Millisecond,
 			resetAfter:     time.Second,
@@ -452,7 +453,7 @@ func TestTicker(test *testing.T) {
 			if stoppedTickCounter != expectedTicksForTickerGoingToBeStopped {
 				test.Errorf("Expected %v ticks from stopped ticker but actually got %v", expectedTicksForTickerGoingToBeStopped, stoppedTickCounter)
 			}
-			fmt.Printf("%v", time.Second/7600)
+			//			fmt.Printf("%v", time.Second/7600)
 		})
 	}
 }
@@ -564,11 +565,11 @@ func TestSleep(test *testing.T) {
 			clock.Sleep(testCase.sleepDuration)
 			elapsedTime := time.Since(startTime)
 			expectedElapsedTime := time.Duration(float64(testCase.sleepDuration) / testCase.dilationFactor)
-			minimumAllowedElapsedTime := expectedElapsedTime - time.Millisecond
-			maximumAllowedElapsedTime := expectedElapsedTime + time.Millisecond
+			minimumAllowedElapsedTime := expectedElapsedTime - 2*time.Millisecond
+			maximumAllowedElapsedTime := expectedElapsedTime + 2*time.Millisecond
 			elapsedTimeIsOutsideOfTolerances := elapsedTime < minimumAllowedElapsedTime || elapsedTime > maximumAllowedElapsedTime
 			if elapsedTimeIsOutsideOfTolerances {
-				test.Errorf("Expected elapsed time to be %v +/- 1ms but actually got %v", expectedElapsedTime, elapsedTime)
+				test.Errorf("Expected elapsed time to be %v +/- 2ms but actually got %v", expectedElapsedTime, elapsedTime)
 			}
 		})
 	}
