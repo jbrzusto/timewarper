@@ -78,21 +78,17 @@ func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv int) {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	newDilatedEpoch := clock.dilatedEpoch.Add(jumpDistance)
-	//	log.Printf("jumping to future by %v to %v", jumpDistance, newDilatedEpoch)
 	for i := 0; i < len(clock.timers); i++ {
 		dur := clock.timers[i].dilatedTriggerTime.Sub(newDilatedEpoch)
 		if dur > 0 {
-			//			log.Printf("adjusting timer %d to new duration %v", clock.timers[i].id, dur)
 			clock.timers[i].Reset(dur)
 		} else {
 			timer := clock.timers[i]
 			if timer.stopped {
-				//				log.Printf("not stopping timer %d which is already stopped", timer.id)
 				continue
 			}
 			rv++
 			go func(t *Timer) {
-				//				log.Printf("stopping timer %d and writing %v to its channel", timer.id, timer.dilatedTriggerTime)
 				t.Stop()
 				t.C <- timer.dilatedTriggerTime
 			}(timer)
@@ -155,7 +151,6 @@ func (clock *Clock) NewTicker(dilatedPeriod time.Duration) *Ticker {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	truePeriod := time.Duration(float64(dilatedPeriod) / clock.dilationFactor)
-	//	log.Printf("starting true ticker %d with duration %v for dilated duration %v with dilationFactor = %g\n", clock.idCounter, truePeriod, dilatedPeriod, clock.dilationFactor)
 	trueTicker := time.NewTicker(truePeriod)
 	dilatedTicker := Ticker{
 		id:            clock.idCounter,
@@ -184,7 +179,6 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	trueDuration := time.Duration(float64(dilatedDuration) / clock.dilationFactor)
-	//	log.Printf("starting true timer %d with duration %v for dilated duration %v with dilationFactor = %g\n", clock.idCounter, trueDuration, dilatedDuration, clock.dilationFactor)
 	newTrueTimer := time.NewTimer(trueDuration)
 	newWarpedTimer := &Timer{
 		id:                  clock.idCounter,
@@ -204,7 +198,6 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 }
 
 func (timer *Timer) waitForTrueTimer() {
-	//	log.Printf("called waitForTrueTimer on timer %d, to trigger at %v, true time %v", timer.id, timer.dilatedTriggerTime, time.Now().Add(timer.trueDuration))
 	timer.access.Lock()
 	defer timer.access.Unlock()
 	if timer.stopped {
@@ -214,9 +207,7 @@ func (timer *Timer) waitForTrueTimer() {
 	case <-timer.trueTimer.C:
 		dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
 		timer.C <- dilatedTimeNow
-		//		log.Printf("true timer %d triggered at %v; expected at %v", timer.id, dilatedTimeNow, timer.dilatedTriggerTime)
 	case <-timer.cancel:
-		//		log.Printf("cancelled waitForTrueTimer on timer %d", timer.id)
 	}
 	timer.trueTimer.Stop()
 	timer.stopped = true
@@ -231,7 +222,6 @@ func (timer *Timer) Reset(dilatedDuration time.Duration) {
 	timer.access.Lock()
 	defer timer.access.Unlock()
 	trueDuration := time.Duration(float64(dilatedDuration) / timer.clock.dilationFactor)
-	//	log.Printf("resetting true timer %d with duration %v for dilated duration %v with dilationFactor = %g\n", timer.id, trueDuration, dilatedDuration, timer.clock.dilationFactor)
 	timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(dilatedDuration)
 	timer.trueTimer.Reset(trueDuration)
 	timer.stopped = false

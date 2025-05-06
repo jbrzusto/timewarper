@@ -666,7 +666,6 @@ func ExampleNewClock() {
 
 func ExampleClock_NewTicker() {
 	startTime := time.Now()
-	//	timeDilationFactor := float64(time.Hour / time.Second)
 	timeDilationFactor := float64(500)
 	clock := NewClock(timeDilationFactor, startTime)
 	dilatedTicker := clock.NewTicker(time.Second)
