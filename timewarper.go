@@ -1,6 +1,7 @@
 package timewarper
 
 import (
+	"runtime"
 	"sync"
 	"time"
 )
@@ -57,7 +58,7 @@ func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 	clock.dilationFactor = newDilationFactor
 	for i := range clock.timers {
 		dilatedTimeRemaining := clock.timers[i].dilatedTriggerTime.Sub(clock.dilatedEpoch)
-		clock.timers[i].Reset(dilatedTimeRemaining)
+		go clock.timers[i].Reset(dilatedTimeRemaining)
 	}
 	for i := range clock.tickers {
 		newDilatedDuration := time.Duration(float64(clock.tickers[i].dilatedPeriod) / newDilationFactor)
@@ -84,7 +85,10 @@ func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv int) {
 			clock.timers[i].Reset(dur)
 		} else {
 			timer := clock.timers[i]
-			if timer.stopped {
+			timer.access.Lock()
+			stopped := timer.stopped
+			timer.access.Unlock()
+			if stopped {
 				continue
 			}
 			rv++
@@ -98,21 +102,13 @@ func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv int) {
 	return
 }
 
-func (clock *Clock) deleteTimer(timerId int) {
-	clock.access.Lock()
-	defer clock.access.Unlock()
-	for i := 0; i < len(clock.timers); i++ {
-		if clock.timers[i].id == timerId {
-			clock.timers = append(clock.timers[:i], clock.timers[i+1:]...)
-			return
-		}
-	}
-}
-
+// After returns a channel on which the dilated time will be written after
+// dilatedDuration.
 func (clock *Clock) After(dilatedDuration time.Duration) <-chan time.Time {
 	return clock.NewTimer(dilatedDuration).C
 }
 
+// Sleep pauses the thread for a dilated duration.
 func (clock *Clock) Sleep(dilatedSleepDuration time.Duration) {
 	clock.access.Lock()
 	trueSleepDuration := time.Duration(float64(dilatedSleepDuration) / clock.dilationFactor)
@@ -120,19 +116,25 @@ func (clock *Clock) Sleep(dilatedSleepDuration time.Duration) {
 	time.Sleep(trueSleepDuration)
 }
 
+// Timer is an analog to time.Timer for a warped clock
 type Timer struct {
-	id                  int
-	trueTimer           *time.Timer
-	trueDuration        time.Duration
-	dilatedTriggerTime  time.Time
-	C                   chan time.Time
-	hasNotBeenTriggered bool
-	cancel              chan bool
-	clock               *Clock
-	stopped             bool
-	access              sync.Mutex
+	id                 int
+	trueTimer          *time.Timer
+	trueDuration       time.Duration
+	dilatedTriggerTime time.Time
+	C                  chan time.Time
+	// reset is a channel on which new durations are sent to the
+	// goroutine which waites for trueTimer.  A new duration of 0
+	// stops the trueTimer, and a new duration < 0 exits the goroutine.
+	reset chan time.Duration
+	clock *Clock
+	// stopped is used by JumpToTheFuture; when true, the Timer is not
+	// triggered by a JumpToTheFuture that passes its dilatedTriggerTime.
+	stopped bool
+	access  sync.Mutex
 }
 
+// Ticker is an analog to time.Ticker for a warped clock
 type Ticker struct {
 	id            int
 	dilatedPeriod time.Duration
@@ -147,6 +149,7 @@ func (clock *Clock) getDilationFactor() float64 {
 	return clock.dilationFactor
 }
 
+// NewTicker returns a Ticker with dilatedPeriod
 func (clock *Clock) NewTicker(dilatedPeriod time.Duration) *Ticker {
 	clock.access.Lock()
 	defer clock.access.Unlock()
@@ -164,10 +167,12 @@ func (clock *Clock) NewTicker(dilatedPeriod time.Duration) *Ticker {
 	return &dilatedTicker
 }
 
+// Stop stops the Ticker
 func (ticker *Ticker) Stop() {
 	ticker.trueTicker.Stop()
 }
 
+// Reset restarts a Ticker with a new dilatedPeriod
 func (ticker *Ticker) Reset(dilatedPeriod time.Duration) {
 	ticker.dilatedPeriod = dilatedPeriod
 	dilationFactor := ticker.clock.getDilationFactor()
@@ -175,55 +180,75 @@ func (ticker *Ticker) Reset(dilatedPeriod time.Duration) {
 	ticker.trueTicker.Reset(truePeriod)
 }
 
+// NewTimer returns a Timer with the dilatedDuration
 func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	trueDuration := time.Duration(float64(dilatedDuration) / clock.dilationFactor)
 	newTrueTimer := time.NewTimer(trueDuration)
 	newWarpedTimer := &Timer{
-		id:                  clock.idCounter,
-		trueTimer:           newTrueTimer,
-		trueDuration:        trueDuration,
-		C:                   make(chan time.Time),
-		dilatedTriggerTime:  now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(dilatedDuration),
-		hasNotBeenTriggered: true,
-		cancel:              make(chan bool),
-		clock:               clock,
-		stopped:             false,
+		id:                 clock.idCounter,
+		trueTimer:          newTrueTimer,
+		trueDuration:       trueDuration,
+		C:                  make(chan time.Time),
+		dilatedTriggerTime: now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(dilatedDuration),
+		reset:              make(chan time.Duration),
+		clock:              clock,
+		stopped:            false,
 	}
+	runtime.AddCleanup(newWarpedTimer, func(c chan time.Duration) { c <- time.Duration(-1) }, newWarpedTimer.reset)
 	go newWarpedTimer.waitForTrueTimer()
 	clock.timers = append(clock.timers, newWarpedTimer)
 	clock.idCounter++
 	return newWarpedTimer
 }
 
+// waitForTrueTimer is run as a goroutine and waits on a time.Timer, writing
+// the dilated time to the Timer's channel, or for a value sent on its reset channel.
+// A dilatedDuration value received from the reset channel is handled thus:
+// - negative: the goroutine exits.  This should only happen when the Timer is being garbage collected.
+// - zero: the trueTimer is stopped, but the goroutine continues, allowing for a subsequent call to Timer.Reset
+// - positive: the trueTimer is reset to a new duration corresponding to the dilatedDuration received
 func (timer *Timer) waitForTrueTimer() {
 	timer.access.Lock()
-	defer timer.access.Unlock()
-	if timer.stopped {
-		return
-	}
-	select {
-	case <-timer.trueTimer.C:
-		dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
-		timer.C <- dilatedTimeNow
-	case <-timer.cancel:
-	}
-	timer.trueTimer.Stop()
-	timer.stopped = true
-}
-
-func (timer *Timer) Stop() {
-	timer.cancel <- true
-}
-
-func (timer *Timer) Reset(dilatedDuration time.Duration) {
-	timer.cancel <- true
-	timer.access.Lock()
-	defer timer.access.Unlock()
-	trueDuration := time.Duration(float64(dilatedDuration) / timer.clock.dilationFactor)
-	timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(dilatedDuration)
-	timer.trueTimer.Reset(trueDuration)
 	timer.stopped = false
-	go timer.waitForTrueTimer()
+	timer.access.Unlock()
+lifespan:
+	for {
+		select {
+		case <-timer.trueTimer.C:
+			dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
+			timer.access.Lock()
+			timer.stopped = true
+			timer.access.Unlock()
+			timer.C <- dilatedTimeNow
+		case newDilatedDuration := <-timer.reset:
+			switch {
+			case newDilatedDuration < 0:
+				break lifespan
+			case newDilatedDuration == 0:
+				timer.trueTimer.Stop()
+				timer.access.Lock()
+				timer.stopped = true
+				timer.access.Unlock()
+			case newDilatedDuration > 0:
+				timer.access.Lock()
+				trueDuration := time.Duration(float64(newDilatedDuration) / timer.clock.dilationFactor)
+				timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(newDilatedDuration)
+				timer.stopped = false
+				timer.trueTimer.Reset(trueDuration)
+				timer.access.Unlock()
+			}
+		}
+	}
+}
+
+// Stop stops the Timer by sending a value on its cancel channel.
+func (timer *Timer) Stop() {
+	timer.reset <- time.Duration(0)
+}
+
+// Reset stops the existing wait for the Timer (if
+func (timer *Timer) Reset(dilatedDuration time.Duration) {
+	timer.reset <- dilatedDuration
 }

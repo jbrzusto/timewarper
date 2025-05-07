@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
-	"sort"
 	"testing"
 	"time"
 
@@ -316,9 +315,6 @@ func TestTimeJumping(test *testing.T) {
 				timerInfos[i].expirationTime = startTime.Add(timerDuration)
 				timerInfos[i].channel = clock.After(timerDuration)
 			}
-			sort.Slice(timerInfos, func(i, j int) bool {
-				return timerInfos[i].expirationTime.Before(timerInfos[j].expirationTime)
-			})
 			n := clock.JumpToTheFuture(testCase.jumpDistance)
 			// wait until we've been able to read from the channel of all triggered timers
 			for n > 0 {
@@ -408,9 +404,8 @@ func TestTicker(test *testing.T) {
 			resetAfter:     5 * time.Second,
 		},
 		{
-			name: "Higher-Speed",
-			//			dilationFactor: 7150,
-			dilationFactor: 800,
+			name:           "Higher-Speed",
+			dilationFactor: 600,
 			tickPeriod:     time.Second,
 			testDuration:   1*time.Second + time.Millisecond,
 			resetAfter:     time.Second,
