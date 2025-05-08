@@ -179,6 +179,11 @@ func (ticker *Ticker) Reset(dilatedPeriod time.Duration) {
 	ticker.trueTicker.Reset(truePeriod)
 }
 
+// Chan returns the channel for a Ticker
+func (ticker *Ticker) Chan() <-chan time.Time {
+	return ticker.C
+}
+
 // NewTimer returns a Timer with the dilatedDuration
 func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 	clock.access.Lock()
