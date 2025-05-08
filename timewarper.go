@@ -22,8 +22,8 @@ type Clock struct {
 //
 // A dilation factor of 1 will have the produced timewarper clock running in lock step with real time, while a factor of 0.5 would run at half the pace of real time,
 // and a factor of 2 would run at twice the speed of real time.
-func NewClock(dilationFactor float64, initialEpoch time.Time) Clock {
-	return Clock{
+func NewClock(dilationFactor float64, initialEpoch time.Time) *Clock {
+	return &Clock{
 		trueEpoch:      time.Now(),
 		dilatedEpoch:   initialEpoch,
 		dilationFactor: dilationFactor,
