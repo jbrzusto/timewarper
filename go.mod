@@ -1,4 +1,4 @@
-module github.com/SnugglyCoder/timewarper
+module github.com/jbrzusto/timewarper
 
 go 1.24.0
 
