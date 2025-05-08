@@ -1,21 +1,20 @@
 package timewarper
 
 import (
+	"log"
 	"time"
 )
 
-// import github.com/jbrzusto/timewarper
-
 // aclock.go: support for time from alternative clocks
 
-// ATimer provides a timer backed by an alternative clock
+// ATimer provides a timer running on an alternative clock
 type ATimer interface {
 	Stop()
 	Reset(time.Duration)
 	Chan() <-chan time.Time
 }
 
-// ATimer provides a ticker backed by an alternative clock
+// ATicker provides a ticker running on an alternative clock
 type ATicker interface {
 	Stop()
 	Reset(time.Duration)
@@ -24,16 +23,32 @@ type ATicker interface {
 
 // AClock provides functions for using alternative clocks.
 type AClock interface {
+	// Now returns the AClock's current time
 	Now() time.Time
+	// After returns a channel to which the AClock's current time will be
+	// written after waiting for the given Duration.
 	After(time.Duration) <-chan time.Time
+	// Sleep waits for the given Duration.
 	Sleep(time.Duration)
+	// NewATimer returns an ATimer of the given duration (measured by the AClock)
 	NewATimer(time.Duration) ATimer
+	// NewATicker returns an ATicker of the given repeat period (measured by the AClock)
 	NewATicker(time.Duration) ATicker
-	SetDilation(int)
-	JumpToTheFuture(time.Duration) bool
+	// ChangeDilationFactor changes the dilation of the AClock, where permitted
+	ChangeDilationFactor(float64)
+	// JumpToTheFuture advances the AClock by a Duration, triggering any timers
+	// whose trigger time is passed along the way.
+	JumpToTheFuture(time.Duration) int
+	// DeleteTimer deletes an ATimer, making it available for GC.  If a thread is reading
+	// from the ATimer channel, it will receive an unspecified value.
+	DeleteTimer(ATimer)
+	// DeleteTicker deletes an ATicker, making it available for GC.  If a thread is reading
+	// from the ATicker channel, it will receive an unspecified value.
+	DeleteTicker(ATicker)
 }
 
 // StandardTimer provides an ATimer based on the system clock.
+// i.e. it wraps the standard time functions into an AClock
 type StandardTimer struct {
 	*time.Timer
 }
@@ -102,17 +117,60 @@ func (sc *StandardClock) NewATicker(d time.Duration) ATicker {
 	return StandardTicker{time.NewTicker(d)}
 }
 
-// JumpToTheFuture returns false, because we can't do it with the standard
+// JumpToTheFuture returns 0, because we can't do it with the standard
 // clock (or rather, we choose not to).
-func (sc *StandardClock) JumpToTheFuture(d time.Duration) bool {
-	return false
+func (sc *StandardClock) JumpToTheFuture(d time.Duration) int {
+	log.Printf("warning: using JumpToTheFuture with a StandardClock does nothing")
+	return 0
 }
 
-// SetDilation does nothing, because we can't do it with the standard
+// ChangeDilationFactor does nothing, because we can't do it with the standard
 // clock.
-func (sc *StandardClock) SetDilation(d int) {
+func (sc *StandardClock) ChangeDilationFactor(d float64) {
+	log.Printf("warning: using ChangeDilationFactor with a StandardClock does nothing")
 }
 
+// DeleteTimer tries to allow GC of the Timer by resetting it to a zero duration
+func (sc *StandardClock) DeleteTimer(at ATimer) {
+	t := at.(StandardTimer)
+	t.Timer.Reset(time.Duration(0))
+}
+
+// DeleteTicker tries to allow GC of the Timer by resetting it to a zero duration
+func (sc *StandardClock) DeleteTicker(at ATicker) {
+	t := at.(StandardTicker)
+	t.Ticker.Reset(time.Duration(0))
+}
+
+// GetStandardClock returns an AClock that uses the system clock.
 func GetStandardClock() AClock {
 	return &StandardClock{}
+}
+
+// WarpedClock provides an AClock based on a timewarper.Clock
+type WarpedClock = Clock
+
+// NewATimer returns a WarpedTimer, which is based on the system clock
+func (wc *WarpedClock) NewATimer(d time.Duration) ATimer {
+	return wc.NewTimer(d)
+}
+
+// NewATicker returns a WarpedTicker, which is based on the system clock
+func (wc *WarpedClock) NewATicker(d time.Duration) ATicker {
+	return wc.NewTicker(d)
+}
+
+// GetWarpedClock returns an AClock based on a timewarper Clock
+func GetWarpedClock(dilationFactor float64, initialEpoch time.Time) AClock {
+	return NewClock(dilationFactor, initialEpoch)
+}
+
+// DeleteTimer tries to allow GC of the Timer
+func (wc *WarpedClock) DeleteTimer(at ATimer) {
+	wc.DelTimer(at.(*Timer))
+}
+
+// DeleteTicker tries to allow GC of the Ticker
+func (wc *WarpedClock) DeleteTicker(at ATicker) {
+	wc.DelTicker(at.(*Ticker))
 }
