@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"runtime"
 	"testing"
 	"time"
 
@@ -606,6 +607,17 @@ func TestTimers(test *testing.T) {
 			test.Errorf("Expected real elapsed time to be %v +/- 4ms but got %v", expectedElapsedTime, realElapsedTime)
 		}
 	}
+}
+
+func ExampleClock_DelTimer() {
+	startTime := time.Now()
+	clock := NewClock(100, startTime)
+	timer := clock.NewTimer(2 * time.Second)
+	runtime.AddCleanup(timer, func(i int) { fmt.Printf("GC for timer %d", i) }, timer.id)
+	clock.DelTimer(timer)
+	runtime.GC()
+	// Output:
+	// GC for timer 0
 }
 
 func ExampleNewClock() {

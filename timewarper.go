@@ -1,7 +1,6 @@
 package timewarper
 
 import (
-	"runtime"
 	"sync"
 	"time"
 )
@@ -196,7 +195,6 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 		clock:              clock,
 		stopped:            false,
 	}
-	runtime.AddCleanup(newWarpedTimer, func(c chan time.Duration) { c <- time.Duration(-1) }, newWarpedTimer.reset)
 	go newWarpedTimer.waitForTrueTimer()
 	clock.timers = append(clock.timers, newWarpedTimer)
 	clock.idCounter++
@@ -206,9 +204,10 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 // waitForTrueTimer is run as a goroutine and waits on a time.Timer, writing
 // the dilated time to the Timer's channel, or for a value sent on its reset channel.
 // A dilatedDuration value received from the reset channel is handled thus:
-// - negative: the goroutine exits.  This should only happen when the Timer is being garbage collected.
-// - zero: the trueTimer is stopped, but the goroutine continues, allowing for a subsequent call to Timer.Reset
-// - positive: the trueTimer is reset to a new duration corresponding to the dilatedDuration received
+//   - negative: the goroutine exits.  This should only happen when the Timer is being garbage collected.
+//     In this case, time.Time(0) is sent to the Timer's channel if a receiver is waiting.
+//   - zero: the trueTimer is stopped, but the goroutine continues, allowing for a subsequent call to Timer.Reset
+//   - positive: the trueTimer is reset to a new duration corresponding to the dilatedDuration received
 func (timer *Timer) waitForTrueTimer() {
 	timer.access.Lock()
 	timer.stopped = false
@@ -225,6 +224,11 @@ lifespan:
 		case newDilatedDuration := <-timer.reset:
 			switch {
 			case newDilatedDuration < 0:
+				// send 0 to C if a receiver is waiting, otherwise do nothing
+				select {
+				case timer.C <- time.Time{}:
+				default:
+				}
 				break lifespan
 			case newDilatedDuration == 0:
 				timer.trueTimer.Stop()
@@ -241,6 +245,33 @@ lifespan:
 			}
 		}
 	}
+}
+
+// DelTimer stops the goroutine for a Timer and deletes it from the
+// clock's set of all Timer, allowing it to be GC'd.  Returns true if
+// the Timer was found.
+func (clock *Clock) DelTimer(t *Timer) bool {
+	for i, v := range clock.timers {
+		if v == t {
+			clock.timers[i].reset <- time.Duration(-1)
+			clock.timers = append(clock.timers[0:i], clock.timers[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// DelTicker deletes the Ticker from the clock's set of all Ticker,
+// allowing it to be GC'd.  Returns true if the Ticker was found.
+func (clock *Clock) DelTicker(t *Ticker) bool {
+	for i, v := range clock.tickers {
+		if v == t {
+			clock.tickers[i].trueTicker.Stop()
+			clock.tickers = append(clock.tickers[0:i], clock.tickers[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 // Stop stops the Timer by sending a value on its cancel channel.
