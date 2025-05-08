@@ -613,11 +613,24 @@ func ExampleClock_DelTimer() {
 	startTime := time.Now()
 	clock := NewClock(100, startTime)
 	timer := clock.NewTimer(2 * time.Second)
-	runtime.AddCleanup(timer, func(i int) { fmt.Printf("GC for timer %d", i) }, timer.id)
+	gcmsg := func(i int) { fmt.Printf("GC for timer\n") }
+	runtime.AddCleanup(timer, gcmsg, timer.id)
+	timer2 := clock.NewTimer(3 * time.Second)
+	runtime.AddCleanup(timer2, gcmsg, timer2.id)
+	go func() {
+		x := <-timer.C
+		fmt.Printf("received %v\n", x)
+	}()
 	clock.DelTimer(timer)
+	clock.DelTimer(timer2)
+	// call GC twice to allow the receive in the above goroutine
+	// to happen first.
+	runtime.GC()
 	runtime.GC()
 	// Output:
-	// GC for timer 0
+	// received 0001-01-01 00:00:00 +0000 UTC
+	// GC for timer
+	// GC for timer
 }
 
 func ExampleNewClock() {

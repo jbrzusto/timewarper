@@ -279,7 +279,13 @@ func (timer *Timer) Stop() {
 	timer.reset <- time.Duration(0)
 }
 
-// Reset stops the existing wait for the Timer (if
+// Reset stops any current waiting for a Timer and sets
+// a new dilated duration.
 func (timer *Timer) Reset(dilatedDuration time.Duration) {
 	timer.reset <- dilatedDuration
+}
+
+// Chan returns the channel for a Timer
+func (timer *Timer) Chan() <-chan time.Time {
+	return timer.C
 }
