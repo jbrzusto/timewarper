@@ -222,10 +222,10 @@ lifespan:
 		select {
 		case <-timer.trueTimer.C:
 			dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
+			timer.C <- dilatedTimeNow
 			timer.access.Lock()
 			timer.stopped = true
 			timer.access.Unlock()
-			timer.C <- dilatedTimeNow
 		case newDilatedDuration := <-timer.reset:
 			switch {
 			case newDilatedDuration < 0:
@@ -236,11 +236,13 @@ lifespan:
 				}
 				break lifespan
 			case newDilatedDuration == 0:
+				// stop the timer
 				timer.trueTimer.Stop()
 				timer.access.Lock()
 				timer.stopped = true
 				timer.access.Unlock()
 			case newDilatedDuration > 0:
+				// set the timer to a new duration
 				timer.access.Lock()
 				trueDuration := time.Duration(float64(newDilatedDuration) / timer.clock.dilationFactor)
 				timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(newDilatedDuration)
