@@ -39,6 +39,11 @@ type AClock interface {
 	// JumpToTheFuture advances the AClock by a Duration, triggering any timers
 	// whose trigger time is passed along the way.
 	JumpToTheFuture(time.Duration) int
+	// JumpToFutureTime is like JumpToTheFuture but accepts a target time.Time,
+	// rather than a duration.  This can be useful if multiple threads are trying
+	// to jump the AClock into the future simultaneously.  It also returns the
+	// number of timers triggered by the jump.
+	JumpToFutureTime(time.Time) int
 	// DeleteTimer deletes an ATimer, making it available for GC.  If a thread is reading
 	// from the ATimer channel, it will receive an unspecified value.
 	DeleteTimer(ATimer)
@@ -121,6 +126,13 @@ func (sc *StandardClock) NewATicker(d time.Duration) ATicker {
 // clock (or rather, we choose not to).
 func (sc *StandardClock) JumpToTheFuture(d time.Duration) int {
 	log.Printf("warning: using JumpToTheFuture with a StandardClock does nothing")
+	return 0
+}
+
+// JumpToFutureTime returns 0, because we can't do it with the standard
+// clock (or rather, we choose not to).
+func (sc *StandardClock) JumpToFutureTime(t time.Time) int {
+	log.Printf("warning: using JumpToFutureTime with a StandardClock does nothing")
 	return 0
 }
 

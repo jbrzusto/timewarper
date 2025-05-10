@@ -78,8 +78,24 @@ func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv int) {
 	clock.access.Lock()
 	defer clock.access.Unlock()
 	newDilatedEpoch := clock.dilatedEpoch.Add(jumpDistance)
+	return clock.jumpToFutureTime(newDilatedEpoch)
+}
+
+// JumpToFutureTime jumps to a specific time.Time.  This avoids race conditions
+// that arise from JumpToTheFuture if multiple threads are calling it.
+func (clock *Clock) JumpToFutureTime(jumpTarget time.Time) (rv int) {
+	clock.access.Lock()
+	defer clock.access.Unlock()
+	return clock.jumpToFutureTime(jumpTarget)
+}
+
+// jumpToFutureTime requires the caller to have locked clock.access
+func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
+	if clock.dilatedEpoch.After(dilatedTarget) {
+		return 0
+	}
 	for i := 0; i < len(clock.timers); i++ {
-		dur := clock.timers[i].dilatedTriggerTime.Sub(newDilatedEpoch)
+		dur := clock.timers[i].dilatedTriggerTime.Sub(dilatedTarget)
 		if dur > 0 {
 			clock.timers[i].Reset(dur)
 		} else {
@@ -97,7 +113,7 @@ func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv int) {
 			}(timer)
 		}
 	}
-	clock.dilatedEpoch = newDilatedEpoch
+	clock.dilatedEpoch = dilatedTarget
 	return
 }
 
