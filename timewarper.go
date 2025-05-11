@@ -72,6 +72,7 @@ func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 }
 
 // JumpToTheFuture will use the given jumpDistance to move the clock forward that far.
+// Nothing happens for jumpDistance <= SystemTimerAccuracy * clock.dilationFactor.
 //
 // For any timers that will expire before the new time, their dilatedTriggerTime is sent
 // on their channel.
@@ -97,9 +98,7 @@ func (clock *Clock) JumpToFutureTime(jumpTarget time.Time) (rv int) {
 
 // jumpToFutureTime requires the caller to have locked clock.access
 func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
-	log.Printf("jumpToFutureTime: %s", dilatedTarget.Format(time.DateTime))
-	if clock.dilatedEpoch.After(dilatedTarget) {
-		log.Printf("   skipping as already in future")
+	if !dilatedTarget.Add(-time.Duration(SystemTimerAccuracy * clock.dilationFactor)).After(clock.dilatedEpoch) {
 		return 0
 	}
 	sort.Slice(clock.timers, func(i, j int) bool {
