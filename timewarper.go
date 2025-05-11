@@ -261,14 +261,16 @@ lifespan:
 				timer.access.Lock()
 				timer.stopped = true
 				timer.access.Unlock()
+				timer.reset <- 0
 			case newDilatedDuration > 0:
 				// set the timer to a new duration
 				timer.access.Lock()
 				trueDuration := time.Duration(float64(newDilatedDuration) / timer.clock.dilationFactor)
 				timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(newDilatedDuration)
 				timer.stopped = false
-				timer.trueTimer.Reset(trueDuration)
 				timer.access.Unlock()
+				timer.trueTimer.Reset(trueDuration)
+				timer.reset <- 0
 			}
 		}
 	}
@@ -301,15 +303,18 @@ func (clock *Clock) DelTicker(t *Ticker) bool {
 	return false
 }
 
-// Stop stops the Timer by sending a value on its cancel channel.
+// Stop stops the Timer by sending a value on its cancel channel,
+// and waiting for confirmation.
 func (timer *Timer) Stop() {
 	timer.reset <- time.Duration(0)
+	<-timer.reset
 }
 
 // Reset stops any current waiting for a Timer and sets
-// a new dilated duration.
+// a new dilated duration; waits for confirmation.
 func (timer *Timer) Reset(dilatedDuration time.Duration) {
 	timer.reset <- dilatedDuration
+	<-timer.reset
 }
 
 // Chan returns the channel for a Timer
