@@ -94,6 +94,7 @@ func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
 	if clock.dilatedEpoch.After(dilatedTarget) {
 		return 0
 	}
+	clock.dilatedEpoch = dilatedTarget
 	for i := 0; i < len(clock.timers); i++ {
 		dur := clock.timers[i].dilatedTriggerTime.Sub(dilatedTarget)
 		if dur > 0 {
@@ -113,7 +114,6 @@ func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
 			}(timer)
 		}
 	}
-	clock.dilatedEpoch = dilatedTarget
 	return
 }
 
@@ -237,8 +237,9 @@ lifespan:
 	for {
 		select {
 		case <-timer.trueTimer.C:
-			dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
-			timer.C <- dilatedTimeNow
+			// dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
+			// timer.C <- dilatedTimeNow
+			timer.C <- timer.dilatedTriggerTime
 			timer.access.Lock()
 			timer.stopped = true
 			timer.access.Unlock()
