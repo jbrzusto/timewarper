@@ -1,7 +1,7 @@
 package timewarper
 
 import (
-	"log"
+	"sort"
 	"sync"
 	"time"
 )
@@ -97,6 +97,9 @@ func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
 		log.Printf("   skipping as already in future")
 		return 0
 	}
+	sort.Slice(clock.timers, func(i, j int) bool {
+		return clock.timers[i].dilatedTriggerTime.Before(clock.timers[j].dilatedTriggerTime)
+	})
 	clock.dilatedEpoch = dilatedTarget
 	for i := 0; i < len(clock.timers); i++ {
 		dur := clock.timers[i].dilatedTriggerTime.Sub(dilatedTarget)
