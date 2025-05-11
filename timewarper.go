@@ -1,6 +1,7 @@
 package timewarper
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -91,7 +92,9 @@ func (clock *Clock) JumpToFutureTime(jumpTarget time.Time) (rv int) {
 
 // jumpToFutureTime requires the caller to have locked clock.access
 func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
+	log.Printf("jumpToFutureTime: %s", dilatedTarget.Format(time.DateTime))
 	if clock.dilatedEpoch.After(dilatedTarget) {
+		log.Printf("   skipping as already in future")
 		return 0
 	}
 	clock.dilatedEpoch = dilatedTarget
