@@ -19,6 +19,11 @@ type Clock struct {
 	idCounter      int
 }
 
+// SystemTimerAccuracy is the expected accuracy of underlying system timers.
+// This is used when jumping the clock forward, to check whether doing so will
+// trigger a timer.
+var SystemTimerAccuracy = float64(5 * time.Millisecond)
+
 // NewClock creates a new timewarper clock initialized with the given initialDilationFactor and given initialEpoch values.
 //
 // A dilation factor of 1 will have the produced timewarper clock running in lock step with real time, while a factor of 0.5 would run at half the pace of real time,
@@ -103,7 +108,7 @@ func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
 	clock.dilatedEpoch = dilatedTarget
 	for i := 0; i < len(clock.timers); i++ {
 		dur := clock.timers[i].dilatedTriggerTime.Sub(dilatedTarget)
-		if dur > 0 {
+		if float64(dur)/clock.dilationFactor > SystemTimerAccuracy {
 			clock.timers[i].Reset(dur)
 		} else {
 			timer := clock.timers[i]
