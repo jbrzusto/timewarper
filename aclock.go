@@ -32,6 +32,9 @@ type AClock interface {
 	Sleep(time.Duration)
 	// NewATimer returns an ATimer of the given duration (measured by the AClock)
 	NewATimer(time.Duration) ATimer
+	// NewStoppedATimer returns a stopped ATimer; this ATimer will do nothing until
+	// its .Reset() method is called
+	NewStoppedATimer() ATimer
 	// NewATicker returns an ATicker of the given repeat period (measured by the AClock)
 	NewATicker(time.Duration) ATicker
 	// ChangeDilationFactor changes the dilation of the AClock, where permitted
@@ -117,6 +120,14 @@ func (sc *StandardClock) NewATimer(d time.Duration) ATimer {
 	return StandardTimer{time.NewTimer(d)}
 }
 
+// NewStoppedATimer returns an already-stopped timer based on the system clock
+func (sc *StandardClock) NewStoppedATimer() ATimer {
+	// create the timer with a true 1 microsecond wait time
+	rv := time.NewTimer(time.Microsecond)
+	<- rv.C
+	return StandardTimer{rv}
+}
+
 // NewATicker returns a StandardTicker, which is based on the system clock
 func (sc *StandardClock) NewATicker(d time.Duration) ATicker {
 	return StandardTicker{time.NewTicker(d)}
@@ -162,12 +173,20 @@ func GetStandardClock() AClock {
 // WarpedClock provides an AClock based on a timewarper.Clock
 type WarpedClock = Clock
 
-// NewATimer returns a WarpedTimer, which is based on the system clock
+// NewATimer returns a WarpedTimer, which is based on the timewarper clock
 func (wc *WarpedClock) NewATimer(d time.Duration) ATimer {
 	return wc.NewTimer(d)
 }
 
-// NewATicker returns a WarpedTicker, which is based on the system clock
+// NewStoppedATimer returns an already-stopped WarpedTimer, which is based on the timewarper clock
+func (wc *WarpedClock) NewStoppedATimer() ATimer {
+	// create the timer with a true 1 microsecond wait time
+	rv := wc.NewTimer(time.Duration(float64(time.Microsecond) * wc.getDilationFactor()))
+	<- rv.Chan()
+	return rv
+}
+
+// NewATicker returns a WarpedTicker, which is based on the timewarper clock
 func (wc *WarpedClock) NewATicker(d time.Duration) ATicker {
 	return wc.NewTicker(d)
 }
