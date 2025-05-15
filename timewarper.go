@@ -22,7 +22,7 @@ type Clock struct {
 // SystemTimerAccuracy is the expected accuracy of underlying system timers.
 // This is used when jumping the clock forward, to check whether doing so will
 // trigger a timer.
-var SystemTimerAccuracy = float64(5 * time.Millisecond)
+var SystemTimerAccuracy = float64(10 * time.Millisecond)
 
 // NewClock creates a new timewarper clock initialized with the given initialDilationFactor and given initialEpoch values.
 //
@@ -108,8 +108,10 @@ func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
 	for i := 0; i < len(clock.timers); i++ {
 		dur := clock.timers[i].dilatedTriggerTime.Sub(dilatedTarget)
 		if float64(dur)/clock.dilationFactor > SystemTimerAccuracy {
-			clock.timers[i].Reset(dur)
+			// fmt.Printf("   changing duration for timer %d (trig was %s)\n", i, clock.timers[i].dilatedTriggerTime.Format(time.StampMilli))
+			go clock.timers[i].Jump(dur)
 		} else {
+			// fmt.Printf("   triggering        for timer %d (trig was %s)\n", i, clock.timers[i].dilatedTriggerTime.Format(time.StampMilli))
 			timer := clock.timers[i]
 			timer.access.Lock()
 			stopped := timer.stopped
@@ -141,6 +143,23 @@ func (clock *Clock) Sleep(dilatedSleepDuration time.Duration) {
 	time.Sleep(trueSleepDuration)
 }
 
+// timerEventType is an enumerated type for
+// different timer events
+type TimerEventType int
+
+const (
+	Quit TimerEventType = iota
+	Stop
+	Reset
+	TimeJump
+	Confirm
+)
+
+type TimerEvent struct {
+	TimerEventType
+	time.Duration
+}
+
 // Timer is an analog to time.Timer for a warped clock
 type Timer struct {
 	id                 int
@@ -148,11 +167,11 @@ type Timer struct {
 	trueDuration       time.Duration
 	dilatedTriggerTime time.Time
 	C                  chan time.Time
-	// reset is a channel on which new durations are sent to the
-	// goroutine which waites for trueTimer.  A new duration of 0
-	// stops the trueTimer, and a new duration < 0 exits the goroutine.
-	reset chan time.Duration
-	clock *Clock
+	// events is a channel used to control the goroutine which
+	// waites for trueTimer.  TimerEvents can be used to stop,
+	// reset, jump, or quit the Timer.
+	events chan TimerEvent
+	clock  *Clock
 	// stopped is used by JumpToTheFuture; when true, the Timer is not
 	// triggered by a JumpToTheFuture that passes its dilatedTriggerTime.
 	stopped bool
@@ -222,7 +241,7 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 		trueDuration:       trueDuration,
 		C:                  make(chan time.Time),
 		dilatedTriggerTime: now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor).Add(dilatedDuration),
-		reset:              make(chan time.Duration),
+		events:             make(chan TimerEvent),
 		clock:              clock,
 		stopped:            false,
 	}
@@ -233,12 +252,7 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 }
 
 // waitForTrueTimer is run as a goroutine and waits on a time.Timer, writing
-// the dilated time to the Timer's channel, or for a value sent on its reset channel.
-// A dilatedDuration value received from the reset channel is handled thus:
-//   - negative: the goroutine exits.  This should only happen when the Timer is being garbage collected.
-//     In this case, time.Time(0) is sent to the Timer's channel if a receiver is waiting.
-//   - zero: the trueTimer is stopped, but the goroutine continues, allowing for a subsequent call to Timer.Reset
-//   - positive: the trueTimer is reset to a new duration corresponding to the dilatedDuration received
+// the dilated time to the Timer's channel, or reacting to an event sent on its events channel.
 func (timer *Timer) waitForTrueTimer() {
 	timer.access.Lock()
 	timer.stopped = false
@@ -253,31 +267,37 @@ lifespan:
 			timer.access.Lock()
 			timer.stopped = true
 			timer.access.Unlock()
-		case newDilatedDuration := <-timer.reset:
-			switch {
-			case newDilatedDuration < 0:
+		case te := <-timer.events:
+			switch te.TimerEventType {
+			case Quit:
 				// send 0 to C if a receiver is waiting, otherwise do nothing
 				select {
 				case timer.C <- time.Time{}:
 				default:
 				}
 				break lifespan
-			case newDilatedDuration == 0:
+			case Stop:
 				// stop the timer
 				timer.trueTimer.Stop()
 				timer.access.Lock()
 				timer.stopped = true
 				timer.access.Unlock()
-				timer.reset <- 0
-			case newDilatedDuration > 0:
-				// set the timer to a new duration
+				timer.events <- TimerEvent{TimerEventType: Confirm}
+			case TimeJump:
+				// handle a clock jump forward
+				fallthrough
+			case Reset:
+				// set the trueTimer to a new duration
+				// On a Reset, also set the dilatedTriggerTime.
 				timer.access.Lock()
-				trueDuration := time.Duration(float64(newDilatedDuration) / timer.clock.dilationFactor)
-				timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(newDilatedDuration)
+				trueDuration := time.Duration(float64(te.Duration) / timer.clock.dilationFactor)
+				if te.TimerEventType == Reset {
+					timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(te.Duration)
+				}
 				timer.stopped = false
 				timer.access.Unlock()
 				timer.trueTimer.Reset(trueDuration)
-				timer.reset <- 0
+				timer.events <- TimerEvent{TimerEventType: Confirm}
 			}
 		}
 	}
@@ -289,7 +309,7 @@ lifespan:
 func (clock *Clock) DelTimer(t *Timer) bool {
 	for i, v := range clock.timers {
 		if v == t {
-			clock.timers[i].reset <- time.Duration(-1)
+			clock.timers[i].events <- TimerEvent{TimerEventType: Quit}
 			clock.timers = append(clock.timers[0:i], clock.timers[i+1:]...)
 			return true
 		}
@@ -313,15 +333,21 @@ func (clock *Clock) DelTicker(t *Ticker) bool {
 // Stop stops the Timer by sending a value on its cancel channel,
 // and waiting for confirmation.
 func (timer *Timer) Stop() {
-	timer.reset <- time.Duration(0)
-	<-timer.reset
+	timer.events <- TimerEvent{TimerEventType: Stop}
+	<-timer.events
 }
 
 // Reset stops any current waiting for a Timer and sets
 // a new dilated duration; waits for confirmation.
 func (timer *Timer) Reset(dilatedDuration time.Duration) {
-	timer.reset <- dilatedDuration
-	<-timer.reset
+	timer.events <- TimerEvent{TimerEventType: Reset, Duration: dilatedDuration}
+	<-timer.events
+}
+
+// Jump tells a timer the warped clock is advancing by the specified dilatedDuration
+func (timer *Timer) Jump(dilatedDuration time.Duration) {
+	timer.events <- TimerEvent{TimerEventType: TimeJump, Duration: dilatedDuration}
+	<-timer.events
 }
 
 // Chan returns the channel for a Timer
