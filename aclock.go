@@ -53,6 +53,10 @@ type AClock interface {
 	// DeleteTicker deletes an ATicker, making it available for GC.  If a thread is reading
 	// from the ATicker channel, it will receive an unspecified value.
 	DeleteTicker(ATicker)
+	// RealTime returns the real time.Time corresponding to the given dilated time
+	RealTime(time.Time) time.Time
+	// RealDuration returns the real time.Duration corresponding to the given dilated duration
+	RealDuration(time.Duration) time.Duration
 }
 
 // StandardTimer provides an ATimer based on the system clock.
@@ -124,7 +128,7 @@ func (sc *StandardClock) NewATimer(d time.Duration) ATimer {
 func (sc *StandardClock) NewStoppedATimer() ATimer {
 	// create the timer with a true 1 microsecond wait time
 	rv := time.NewTimer(time.Microsecond)
-	<- rv.C
+	<-rv.C
 	return StandardTimer{rv}
 }
 
@@ -165,6 +169,15 @@ func (sc *StandardClock) DeleteTicker(at ATicker) {
 	t.Ticker.Reset(time.Duration(0))
 }
 
+func (sc *StandardClock) RealTime(t time.Time) time.Time {
+	return t
+}
+
+// RealDuration returns the real time.Duration corresponding to the given dilated duration
+func (sc *StandardClock) RealDuration(d time.Duration) time.Duration {
+	return d
+}
+
 // GetStandardClock returns an AClock that uses the system clock.
 func GetStandardClock() AClock {
 	return &StandardClock{}
@@ -182,7 +195,7 @@ func (wc *WarpedClock) NewATimer(d time.Duration) ATimer {
 func (wc *WarpedClock) NewStoppedATimer() ATimer {
 	// create the timer with a true 1 microsecond wait time
 	rv := wc.NewTimer(time.Duration(float64(time.Microsecond) * wc.getDilationFactor()))
-	<- rv.Chan()
+	<-rv.Chan()
 	return rv
 }
 
@@ -204,4 +217,13 @@ func (wc *WarpedClock) DeleteTimer(at ATimer) {
 // DeleteTicker tries to allow GC of the Ticker
 func (wc *WarpedClock) DeleteTicker(at ATicker) {
 	wc.DelTicker(at.(*Ticker))
+}
+
+func (wc *WarpedClock) RealTime(t time.Time) time.Time {
+	return wc.trueEpoch.Add(time.Duration(float64(t.Sub(wc.dilatedEpoch)) / wc.dilationFactor))
+}
+
+// RealDuration returns the real time.Duration corresponding to the given dilated duration
+func (wc *WarpedClock) RealDuration(d time.Duration) time.Duration {
+	return time.Duration(float64(d) / wc.dilationFactor)
 }
