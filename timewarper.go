@@ -270,7 +270,8 @@ lifespan:
 		case <-timer.trueTimer.C:
 			// dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
 			// timer.C <- dilatedTimeNow
-			timer.C <- timer.dilatedTriggerTime
+			//			timer.C <- timer.dilatedTriggerTime
+			timer.C <- timer.clock.Now()
 			timer.access.Lock()
 			timer.stopped = true
 			timer.access.Unlock()
