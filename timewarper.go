@@ -151,6 +151,7 @@ const (
 	Quit TimerEventType = iota
 	Stop
 	Reset
+	ResetTo
 	TimeJump
 	Confirm
 )
@@ -158,6 +159,7 @@ const (
 type TimerEvent struct {
 	TimerEventType
 	time.Duration
+	time.Time
 }
 
 // Timer is an analog to time.Timer for a warped clock
@@ -251,6 +253,11 @@ func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
 	return newWarpedTimer
 }
 
+// NewATimerTo returns a Timer with the given dilatedTriggerTime
+func (clock *Clock) NewATimerTo(dilatedTriggerTime time.Time) ATimer {
+	return clock.NewTimer(dilatedTriggerTime.Sub(clock.Now()))
+}
+
 // waitForTrueTimer is run as a goroutine and waits on a time.Timer, writing
 // the dilated time to the Timer's channel, or reacting to an event sent on its events channel.
 func (timer *Timer) waitForTrueTimer() {
@@ -337,11 +344,20 @@ func (timer *Timer) Stop() {
 	<-timer.events
 }
 
-// Reset stops any current waiting for a Timer and sets
-// a new dilated duration; waits for confirmation.
+// Reset sets a new dilated duration; waits for confirmation.
 func (timer *Timer) Reset(dilatedDuration time.Duration) {
 	timer.events <- TimerEvent{TimerEventType: Reset, Duration: dilatedDuration}
 	<-timer.events
+}
+
+// ResetTo sets a new dilated trigger time; waits for confirmation.
+func (timer *Timer) ResetTo(dilatedTriggerTime time.Time) {
+	timer.Reset(dilatedTriggerTime.Sub(timer.clock.Now()))
+}
+
+// Target returns the dilatedTriggerTime
+func (timer *Timer) Target() time.Time {
+	return timer.dilatedTriggerTime
 }
 
 // Jump tells a timer the warped clock is advancing by the specified dilatedDuration

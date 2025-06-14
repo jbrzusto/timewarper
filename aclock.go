@@ -11,6 +11,8 @@ import (
 type ATimer interface {
 	Stop()
 	Reset(time.Duration)
+	ResetTo(time.Time)
+	Target() time.Time
 	Chan() <-chan time.Time
 }
 
@@ -32,6 +34,8 @@ type AClock interface {
 	Sleep(time.Duration)
 	// NewATimer returns an ATimer of the given duration (measured by the AClock)
 	NewATimer(time.Duration) ATimer
+	// NewATimerTo returns an ATimer to be triggered at the given time (measured by the AClock)
+	NewATimerTo(time.Time) ATimer
 	// NewStoppedATimer returns a stopped ATimer; this ATimer will do nothing until
 	// its .Reset() method is called
 	NewStoppedATimer() ATimer
@@ -63,6 +67,7 @@ type AClock interface {
 // i.e. it wraps the standard time functions into an AClock
 type StandardTimer struct {
 	*time.Timer
+	target time.Time
 }
 
 // Stop stops the timer
@@ -70,9 +75,22 @@ func (st StandardTimer) Stop() {
 	st.Timer.Stop()
 }
 
-// Reset resets the timer
+// Reset resets the timer duration
 func (st StandardTimer) Reset(d time.Duration) {
+	st.target = time.Now().Add(d)
 	st.Timer.Reset(d)
+}
+
+// Reset resets the timer target time
+func (st StandardTimer) ResetTo(t time.Time) {
+	d := t.Sub(time.Now())
+	st.target = t
+	st.Timer.Reset(d)
+}
+
+// Target returns the timer's target time
+func (st StandardTimer) Target() time.Time {
+	return st.target
 }
 
 // Chan returns the channel for the timer
@@ -120,16 +138,34 @@ func (sc *StandardClock) Sleep(d time.Duration) {
 }
 
 // NewATimer returns a StandardTimer, which is based on the system clock
-func (sc *StandardClock) NewATimer(d time.Duration) ATimer {
-	return StandardTimer{time.NewTimer(d)}
+func (sc *StandardClock) NewATimer(d time.Duration) (rv ATimer) {
+	target := time.Now().Add(d)
+	rv = StandardTimer{
+		target: target,
+		Timer:  time.NewTimer(d),
+	}
+	return
+}
+
+// NewATimerTo returns a StandardTimer with the given target time
+func (sc *StandardClock) NewATimerTo(t time.Time) (rv ATimer) {
+	d := t.Sub(time.Now())
+	rv = StandardTimer{
+		target: t,
+		Timer:  time.NewTimer(d),
+	}
+	return
 }
 
 // NewStoppedATimer returns an already-stopped timer based on the system clock
 func (sc *StandardClock) NewStoppedATimer() ATimer {
-	// create the timer with a true 1 microsecond wait time
+	// create the timer with a true 1 microsecond wait time, and wait for it
 	rv := time.NewTimer(time.Microsecond)
 	<-rv.C
-	return StandardTimer{rv}
+	return StandardTimer{
+		target: time.Time{},
+		Timer:  rv,
+	}
 }
 
 // NewATicker returns a StandardTicker, which is based on the system clock
