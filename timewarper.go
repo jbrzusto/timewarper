@@ -151,7 +151,7 @@ const (
 	Quit TimerEventType = iota
 	Stop
 	Reset
-	ResetTo
+	ResetUnsafe
 	TimeJump
 	Confirm
 )
@@ -306,6 +306,16 @@ lifespan:
 				timer.access.Unlock()
 				timer.trueTimer.Reset(trueDuration)
 				timer.events <- TimerEvent{TimerEventType: Confirm}
+			case ResetUnsafe:
+				// set the trueTimer to a new duration
+				// On a Reset, also set the dilatedTriggerTime.
+				trueDuration := time.Duration(float64(te.Duration) / timer.clock.dilationFactor)
+				if te.TimerEventType == Reset {
+					timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(te.Duration)
+				}
+				timer.stopped = false
+				timer.trueTimer.Reset(trueDuration)
+				timer.events <- TimerEvent{TimerEventType: Confirm}
 			}
 		}
 	}
@@ -354,6 +364,17 @@ func (timer *Timer) Reset(dilatedDuration time.Duration) {
 // ResetTo sets a new dilated trigger time; waits for confirmation.
 func (timer *Timer) ResetTo(dilatedTriggerTime time.Time) {
 	timer.Reset(dilatedTriggerTime.Sub(timer.clock.Now()))
+}
+
+// Reset sets a new dilated duration; waits for confirmation.
+func (timer *Timer) ResetUnsafe(dilatedDuration time.Duration) {
+	timer.events <- TimerEvent{TimerEventType: ResetUnsafe, Duration: dilatedDuration}
+	<-timer.events
+}
+
+// ResetTo sets a new dilated trigger time; waits for confirmation.
+func (timer *Timer) ResetToUnsafe(dilatedTriggerTime time.Time) {
+	timer.ResetUnsafe(dilatedTriggerTime.Sub(timer.clock.Now()))
 }
 
 // Target returns the dilatedTriggerTime
