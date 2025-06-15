@@ -53,6 +53,12 @@ func now(trueEpoch, dilatedEpoch time.Time, dilationFactor float64) time.Time {
 	return dilatedNow
 }
 
+func (clock *Clock) dilatedTimeUnsafe(trueTime time.Time) time.Time {
+	trueElapsed := trueTime.Sub(clock.trueEpoch)
+	dilatedElapsed := time.Duration(float64(trueElapsed) * clock.dilationFactor)
+	return clock.dilatedEpoch.Add(dilatedElapsed)
+}
+
 // ChangeDilationFactor will set the timewarper clock's dilation factor to the factor give.
 // The time given after changing the dilation factor will take into account all the previous time dilation changes and warps that have occurred in the past
 func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
@@ -267,11 +273,9 @@ func (timer *Timer) waitForTrueTimer() {
 lifespan:
 	for {
 		select {
-		case <-timer.trueTimer.C:
-			// dilatedTimeNow := now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor)
-			// timer.C <- dilatedTimeNow
-			//			timer.C <- timer.dilatedTriggerTime
-			timer.C <- timer.clock.Now()
+		case tt := <-timer.trueTimer.C:
+			// log.Printf("timewarper: true timer went at %s\n", tt.Format(time.StampMicro))
+			timer.C <- timer.clock.dilatedTimeUnsafe(tt)
 			timer.access.Lock()
 			timer.stopped = true
 			timer.access.Unlock()
@@ -315,6 +319,7 @@ lifespan:
 				}
 				timer.stopped = false
 				timer.trueTimer.Reset(trueDuration)
+				// log.Printf("timewarper: true timer reset to %s\n", time.Now().Add(trueDuration).Format(time.StampMicro))
 				timer.events <- TimerEvent{TimerEventType: Confirm}
 			}
 		}
