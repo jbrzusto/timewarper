@@ -8,7 +8,8 @@ import (
 
 // Clock is a time mechanism that also allows for dilating time to make it run faster or slower relative to real time.
 //
-// Clocks are safe for multithreaded access.
+// Clocks are safe for multithreaded access, unless unsafe==true, in which case the user must ensure
+// only one thread at a time can change clock characteristics, allocate Timers and Tickers, or jumpToTheFuture.
 type Clock struct {
 	trueEpoch      time.Time
 	dilatedEpoch   time.Time
@@ -17,6 +18,7 @@ type Clock struct {
 	timers         []*Timer
 	tickers        []*Ticker
 	idCounter      int
+	unsafe         bool
 }
 
 // SystemTimerAccuracy is the expected accuracy of underlying system timers.
@@ -41,9 +43,24 @@ func NewClock(dilationFactor float64, initialEpoch time.Time) *Clock {
 //
 // It will take into account all the time warping that has happened in its past.
 func (clock *Clock) Now() time.Time {
-	clock.access.Lock()
-	defer clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	return now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor)
+}
+
+// SetUnsafe makes the clock unsafe, if the parameter is true; otherwise,
+// the clock is made safe again.  When the clock is unsafe, timers are more
+// accurate, but the clock and its timers and tickers are no longer thread-safe.
+// SetUnsafe is intended for applications where a single thread uses the clock, and
+// where greater precision in Timers and Tickers is desired.
+func (clock *Clock) SetUnsafe(x bool) {
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
+	clock.unsafe = x
 }
 
 func now(trueEpoch, dilatedEpoch time.Time, dilationFactor float64) time.Time {
@@ -53,7 +70,11 @@ func now(trueEpoch, dilatedEpoch time.Time, dilationFactor float64) time.Time {
 	return dilatedNow
 }
 
-func (clock *Clock) dilatedTimeUnsafe(trueTime time.Time) time.Time {
+func (clock *Clock) dilatedTime(trueTime time.Time) time.Time {
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	trueElapsed := trueTime.Sub(clock.trueEpoch)
 	dilatedElapsed := time.Duration(float64(trueElapsed) * clock.dilationFactor)
 	return clock.dilatedEpoch.Add(dilatedElapsed)
@@ -62,8 +83,10 @@ func (clock *Clock) dilatedTimeUnsafe(trueTime time.Time) time.Time {
 // ChangeDilationFactor will set the timewarper clock's dilation factor to the factor give.
 // The time given after changing the dilation factor will take into account all the previous time dilation changes and warps that have occurred in the past
 func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
-	clock.access.Lock()
-	defer clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	clock.dilatedEpoch = now(clock.trueEpoch, clock.dilatedEpoch, clock.dilationFactor)
 	clock.trueEpoch = time.Now()
 	clock.dilationFactor = newDilationFactor
@@ -88,8 +111,10 @@ func (clock *Clock) ChangeDilationFactor(newDilationFactor float64) {
 //
 // The function returns the number of timers which triggered due to the jump.
 func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv int) {
-	clock.access.Lock()
-	defer clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	newDilatedEpoch := clock.dilatedEpoch.Add(jumpDistance)
 	return clock.jumpToFutureTime(newDilatedEpoch)
 }
@@ -97,8 +122,10 @@ func (clock *Clock) JumpToTheFuture(jumpDistance time.Duration) (rv int) {
 // JumpToFutureTime jumps to a specific time.Time.  This avoids race conditions
 // that arise from JumpToTheFuture if multiple threads are calling it.
 func (clock *Clock) JumpToFutureTime(jumpTarget time.Time) (rv int) {
-	clock.access.Lock()
-	defer clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	return clock.jumpToFutureTime(jumpTarget)
 }
 
@@ -119,9 +146,13 @@ func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
 		} else {
 			// fmt.Printf("   triggering        for timer %d (trig was %s)\n", i, clock.timers[i].dilatedTriggerTime.Format(time.StampMilli))
 			timer := clock.timers[i]
-			timer.access.Lock()
+			if !clock.unsafe {
+				timer.access.Lock()
+			}
 			stopped := timer.stopped
-			timer.access.Unlock()
+			if !clock.unsafe {
+				timer.access.Unlock()
+			}
 			if stopped {
 				continue
 			}
@@ -143,9 +174,13 @@ func (clock *Clock) After(dilatedDuration time.Duration) <-chan time.Time {
 
 // Sleep pauses the thread for a dilated duration.
 func (clock *Clock) Sleep(dilatedSleepDuration time.Duration) {
-	clock.access.Lock()
+	if !clock.unsafe {
+		clock.access.Lock()
+	}
 	trueSleepDuration := time.Duration(float64(dilatedSleepDuration) / clock.dilationFactor)
-	clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Unlock()
+	}
 	time.Sleep(trueSleepDuration)
 }
 
@@ -196,15 +231,19 @@ type Ticker struct {
 }
 
 func (clock *Clock) getDilationFactor() float64 {
-	clock.access.Lock()
-	defer clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	return clock.dilationFactor
 }
 
 // NewTicker returns a Ticker with dilatedPeriod
 func (clock *Clock) NewTicker(dilatedPeriod time.Duration) *Ticker {
-	clock.access.Lock()
-	defer clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	truePeriod := time.Duration(float64(dilatedPeriod) / clock.dilationFactor)
 	trueTicker := time.NewTicker(truePeriod)
 	dilatedTicker := Ticker{
@@ -239,8 +278,10 @@ func (ticker *Ticker) Chan() <-chan time.Time {
 
 // NewTimer returns a Timer with the dilatedDuration
 func (clock *Clock) NewTimer(dilatedDuration time.Duration) *Timer {
-	clock.access.Lock()
-	defer clock.access.Unlock()
+	if !clock.unsafe {
+		clock.access.Lock()
+		defer clock.access.Unlock()
+	}
 	trueDuration := time.Duration(float64(dilatedDuration) / clock.dilationFactor)
 	newTrueTimer := time.NewTimer(trueDuration)
 	newWarpedTimer := &Timer{
@@ -267,18 +308,26 @@ func (clock *Clock) NewATimerTo(dilatedTriggerTime time.Time) ATimer {
 // waitForTrueTimer is run as a goroutine and waits on a time.Timer, writing
 // the dilated time to the Timer's channel, or reacting to an event sent on its events channel.
 func (timer *Timer) waitForTrueTimer() {
-	timer.access.Lock()
+	if !timer.clock.unsafe {
+		timer.access.Lock()
+	}
 	timer.stopped = false
-	timer.access.Unlock()
+	if !timer.clock.unsafe {
+		timer.access.Unlock()
+	}
 lifespan:
 	for {
 		select {
 		case tt := <-timer.trueTimer.C:
 			// log.Printf("timewarper: true timer went at %s\n", tt.Format(time.StampMicro))
-			timer.C <- timer.clock.dilatedTimeUnsafe(tt)
-			timer.access.Lock()
+			timer.C <- timer.clock.dilatedTime(tt)
+			if !timer.clock.unsafe {
+				timer.access.Lock()
+			}
 			timer.stopped = true
-			timer.access.Unlock()
+			if !timer.clock.unsafe {
+				timer.access.Unlock()
+			}
 		case te := <-timer.events:
 			switch te.TimerEventType {
 			case Quit:
@@ -291,9 +340,13 @@ lifespan:
 			case Stop:
 				// stop the timer
 				timer.trueTimer.Stop()
-				timer.access.Lock()
+				if !timer.clock.unsafe {
+					timer.access.Lock()
+				}
 				timer.stopped = true
-				timer.access.Unlock()
+				if !timer.clock.unsafe {
+					timer.access.Unlock()
+				}
 				timer.events <- TimerEvent{TimerEventType: Confirm}
 			case TimeJump:
 				// handle a clock jump forward
@@ -301,25 +354,18 @@ lifespan:
 			case Reset:
 				// set the trueTimer to a new duration
 				// On a Reset, also set the dilatedTriggerTime.
-				timer.access.Lock()
+				if !timer.clock.unsafe {
+					timer.access.Lock()
+				}
 				trueDuration := time.Duration(float64(te.Duration) / timer.clock.dilationFactor)
 				if te.TimerEventType == Reset {
 					timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(te.Duration)
 				}
 				timer.stopped = false
-				timer.access.Unlock()
-				timer.trueTimer.Reset(trueDuration)
-				timer.events <- TimerEvent{TimerEventType: Confirm}
-			case ResetUnsafe:
-				// set the trueTimer to a new duration
-				// On a Reset, also set the dilatedTriggerTime.
-				trueDuration := time.Duration(float64(te.Duration) / timer.clock.dilationFactor)
-				if te.TimerEventType == Reset {
-					timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(te.Duration)
+				if !timer.clock.unsafe {
+					timer.access.Unlock()
 				}
-				timer.stopped = false
 				timer.trueTimer.Reset(trueDuration)
-				// log.Printf("timewarper: true timer reset to %s\n", time.Now().Add(trueDuration).Format(time.StampMicro))
 				timer.events <- TimerEvent{TimerEventType: Confirm}
 			}
 		}
@@ -369,17 +415,6 @@ func (timer *Timer) Reset(dilatedDuration time.Duration) {
 // ResetTo sets a new dilated trigger time; waits for confirmation.
 func (timer *Timer) ResetTo(dilatedTriggerTime time.Time) {
 	timer.Reset(dilatedTriggerTime.Sub(timer.clock.Now()))
-}
-
-// Reset sets a new dilated duration; waits for confirmation.
-func (timer *Timer) ResetUnsafe(dilatedDuration time.Duration) {
-	timer.events <- TimerEvent{TimerEventType: ResetUnsafe, Duration: dilatedDuration}
-	<-timer.events
-}
-
-// ResetTo sets a new dilated trigger time; waits for confirmation.
-func (timer *Timer) ResetToUnsafe(dilatedTriggerTime time.Time) {
-	timer.ResetUnsafe(dilatedTriggerTime.Sub(timer.clock.Now()))
 }
 
 // Target returns the dilatedTriggerTime

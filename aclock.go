@@ -12,8 +12,6 @@ type ATimer interface {
 	Stop()
 	Reset(time.Duration)
 	ResetTo(time.Time)
-	ResetUnsafe(time.Duration)
-	ResetToUnsafe(time.Time)
 	Target() time.Time
 	Chan() <-chan time.Time
 }
@@ -85,19 +83,6 @@ func (st StandardTimer) Reset(d time.Duration) {
 
 // ResetTo resets the timer target time
 func (st StandardTimer) ResetTo(t time.Time) {
-	d := t.Sub(time.Now())
-	st.target = t
-	st.Timer.Reset(d)
-}
-
-// ResetUnsafe resets the timer duration
-func (st StandardTimer) ResetUnsafe(d time.Duration) {
-	st.target = time.Now().Add(d)
-	st.Timer.Reset(d)
-}
-
-// ResetToUnsafe resets the timer target time
-func (st StandardTimer) ResetToUnsafe(t time.Time) {
 	d := t.Sub(time.Now())
 	st.target = t
 	st.Timer.Reset(d)
