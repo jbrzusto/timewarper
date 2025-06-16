@@ -320,11 +320,11 @@ lifespan:
 		select {
 		case tt := <-timer.trueTimer.C:
 			// log.Printf("timewarper: true timer went at %s\n", tt.Format(time.StampMicro))
+			timer.stopped = true
 			timer.C <- timer.clock.dilatedTime(tt)
 			if !timer.clock.unsafe {
 				timer.access.Lock()
 			}
-			timer.stopped = true
 			if !timer.clock.unsafe {
 				timer.access.Unlock()
 			}
