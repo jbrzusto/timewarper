@@ -160,11 +160,11 @@ func (sc *StandardClock) NewATimerTo(t time.Time) (rv ATimer) {
 // NewStoppedATimer returns an already-stopped timer based on the system clock
 func (sc *StandardClock) NewStoppedATimer() ATimer {
 	// create the timer with a true 1 microsecond wait time, and wait for it
-	rv := time.NewTimer(time.Microsecond)
-	<-rv.C
+	tmr := time.NewTimer(time.Microsecond)
+	<-tmr.C
 	return StandardTimer{
 		target: time.Time{},
-		Timer:  rv,
+		Timer:  tmr,
 	}
 }
 
