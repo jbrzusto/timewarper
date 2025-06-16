@@ -358,7 +358,9 @@ lifespan:
 					timer.access.Lock()
 				}
 				trueDuration := time.Duration(float64(te.Duration) / timer.clock.dilationFactor)
-				timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(te.Duration)
+				if te.TimerEventType == TimeJump {
+					timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(te.Duration)
+				}
 				timer.stopped = false
 				if !timer.clock.unsafe {
 					timer.access.Unlock()
