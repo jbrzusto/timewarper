@@ -232,6 +232,7 @@ func (wc *WarpedClock) NewStoppedATimer() ATimer {
 	// create the timer with a true 1 microsecond wait time
 	rv := wc.NewTimer(time.Duration(float64(time.Microsecond) * wc.getDilationFactor()))
 	<-rv.Chan()
+	rv.dilatedTriggerTime = time.Time{}
 	return rv
 }
 
