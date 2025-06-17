@@ -61,6 +61,10 @@ type AClock interface {
 	RealTime(time.Time) time.Time
 	// RealDuration returns the real time.Duration corresponding to the given dilated duration
 	RealDuration(time.Duration) time.Duration
+	// SetUnsafe sets the unsafe flag.  When set, the AClock and
+	// its timers are unsafe for multithreaded access, but accurcy
+	// of timers may be improved.
+	SetUnsafe(bool)
 }
 
 // StandardTimer provides an ATimer based on the system clock.
@@ -212,6 +216,10 @@ func (sc *StandardClock) RealTime(t time.Time) time.Time {
 // RealDuration returns the real time.Duration corresponding to the given dilated duration
 func (sc *StandardClock) RealDuration(d time.Duration) time.Duration {
 	return d
+}
+
+// SetUnsafe does nothing for a real clock
+func (sc *StandardClock) SetUnsafe(v bool) {
 }
 
 // GetStandardClock returns an AClock that uses the system clock.
