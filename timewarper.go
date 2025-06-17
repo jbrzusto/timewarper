@@ -307,8 +307,10 @@ func (clock *Clock) NewATimerTo(dilatedTriggerTime time.Time) ATimer {
 func (timer *Timer) waitForTrueTimer() {
 	for {
 		select {
-		case t := <-timer.trueTimer.C:
-			timer.C <- timer.clock.dilatedTime(t)
+		case t, ok := <-timer.trueTimer.C:
+			if ok {
+				timer.C <- timer.clock.dilatedTime(t)
+			}
 		case <-timer.cancelChan:
 			select {
 			case timer.C <- time.Time{}:
