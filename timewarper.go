@@ -371,7 +371,7 @@ func (timer *Timer) Reset(dilatedDuration time.Duration) {
 	trueDuration := time.Duration(float64(dilatedDuration) / timer.clock.dilationFactor)
 	timer.dilatedTriggerTime = now(timer.clock.trueEpoch, timer.clock.dilatedEpoch, timer.clock.dilationFactor).Add(dilatedDuration)
 	timer.stopped = false
-	timer.trueTimer.Reset(max(1, trueDuration))
+	timer.trueTimer.Reset(trueDuration)
 }
 
 // ResetTo sets a new dilated trigger time for the Timer
@@ -386,7 +386,7 @@ func (timer *Timer) ResetTo(dilatedTriggerTime time.Time) {
 	trueDuration := time.Duration(float64(dilatedDuration) / timer.clock.dilationFactor)
 	timer.stopped = false
 	timer.dilatedTriggerTime = dilatedTriggerTime
-	timer.trueTimer.Reset(max(1, trueDuration))
+	timer.trueTimer.Reset(trueDuration)
 }
 
 // Target returns the dilatedTriggerTime
