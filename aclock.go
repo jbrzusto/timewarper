@@ -75,31 +75,31 @@ type StandardTimer struct {
 }
 
 // Stop stops the timer
-func (st StandardTimer) Stop() {
+func (st *StandardTimer) Stop() {
 	st.Timer.Stop()
 }
 
 // Reset resets the timer duration
-func (st StandardTimer) Reset(d time.Duration) {
+func (st *StandardTimer) Reset(d time.Duration) {
 	st.target = time.Now().Add(d)
 	st.Timer.Reset(d)
 }
 
 // ResetTo resets the timer target time
-func (st StandardTimer) ResetTo(t time.Time) {
-	d := t.Sub(time.Now())
+func (st *StandardTimer) ResetTo(t time.Time) {
+	d := time.Until(t)
 	st.target = t
 	st.Timer.Reset(d)
 }
 
 // Target returns the timer's target time
-func (st StandardTimer) Target() time.Time {
+func (st *StandardTimer) Target() time.Time {
 	return st.target
 }
 
 // Chan returns the channel for the timer
-func (st StandardTimer) Chan() <-chan time.Time {
-	return st.Timer.C
+func (st *StandardTimer) Chan() <-chan time.Time {
+	return st.C
 }
 
 // StandardTicker provides an ATicker based on the system clock.
@@ -119,7 +119,7 @@ func (st StandardTicker) Reset(d time.Duration) {
 
 // Chan returns the channel for the ticker
 func (st StandardTicker) Chan() <-chan time.Time {
-	return st.Ticker.C
+	return st.C
 }
 
 // StandardClock provides an AClock based on the system clock.
@@ -144,7 +144,7 @@ func (sc *StandardClock) Sleep(d time.Duration) {
 // NewATimer returns a StandardTimer, which is based on the system clock
 func (sc *StandardClock) NewATimer(d time.Duration) (rv ATimer) {
 	target := time.Now().Add(d)
-	rv = StandardTimer{
+	rv = &StandardTimer{
 		target: target,
 		Timer:  time.NewTimer(d),
 	}
@@ -153,8 +153,8 @@ func (sc *StandardClock) NewATimer(d time.Duration) (rv ATimer) {
 
 // NewATimerTo returns a StandardTimer with the given target time
 func (sc *StandardClock) NewATimerTo(t time.Time) (rv ATimer) {
-	d := t.Sub(time.Now())
-	rv = StandardTimer{
+	d := time.Until(t)
+	rv = &StandardTimer{
 		target: t,
 		Timer:  time.NewTimer(d),
 	}
@@ -166,7 +166,7 @@ func (sc *StandardClock) NewStoppedATimer() ATimer {
 	// create the timer with a true 1 microsecond wait time, and wait for it
 	tmr := time.NewTimer(time.Microsecond)
 	<-tmr.C
-	return StandardTimer{
+	return &StandardTimer{
 		target: time.Time{},
 		Timer:  tmr,
 	}
@@ -199,7 +199,7 @@ func (sc *StandardClock) ChangeDilationFactor(d float64) {
 
 // DeleteTimer tries to allow GC of the Timer by resetting it to a zero duration
 func (sc *StandardClock) DeleteTimer(at ATimer) {
-	t := at.(StandardTimer)
+	t := at.(*StandardTimer)
 	t.Timer.Reset(time.Duration(0))
 }
 
