@@ -1,6 +1,7 @@
 package timewarper
 
 import (
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -132,6 +133,7 @@ func (clock *Clock) JumpToFutureTime(jumpTarget time.Time) (rv int) {
 // jumpToFutureTime requires the caller to have locked clock.access
 func (clock *Clock) jumpToFutureTime(dilatedTarget time.Time) (rv int) {
 	if !dilatedTarget.Add(-time.Duration(SystemTimerAccuracy * clock.dilationFactor)).After(clock.dilatedEpoch) {
+		log.Printf("skipping insufficiently large future jump\n")
 		return 0
 	}
 	sort.Slice(clock.timers, func(i, j int) bool {
